@@ -37,6 +37,17 @@ export default function SettlementPage() {
     return colors[status] || 'bg-gray-100 text-gray-700';
   };
 
+  const getPaymentStageColor = (stage: string | null | undefined) => {
+    if (!stage) return 'bg-gray-100 text-gray-500';
+    const colors: Record<string, string> = {
+      선금: 'bg-yellow-100 text-yellow-700',
+      중도금: 'bg-blue-100 text-blue-700',
+      잔금: 'bg-purple-100 text-purple-700',
+      완료: 'bg-green-100 text-green-700',
+    };
+    return colors[stage] || 'bg-gray-100 text-gray-700';
+  };
+
   const calculateTotals = (projectId: string) => {
     const projectReceipts = receipts.filter((r) => r.projectId === projectId);
     const totalReceived = projectReceipts.reduce((sum, r) => sum + r.amount, 0);
@@ -113,6 +124,7 @@ export default function SettlementPage() {
               </th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">구분</th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">현태</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">입금단계</th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">확정</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">계약금</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">지출총액</th>
@@ -148,6 +160,19 @@ export default function SettlementPage() {
                     >
                       {getStatusLabel(project.status)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {project.paymentStage ? (
+                      <span
+                        className={`px-2 py-1 rounded text-xs font-medium ${getPaymentStageColor(
+                          project.paymentStage
+                        )}`}
+                      >
+                        {project.paymentStage}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">-</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {project.confirmed ? (
