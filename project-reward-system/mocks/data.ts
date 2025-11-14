@@ -281,26 +281,72 @@ export const schedules: Schedule[] = [
 
 // 입금내역
 export const receipts: Receipt[] = [
+  // proj-6
   {
     id: 'rec-1',
     projectId: 'proj-6',
     date: '2025-08-15',
-    amount: 5162393,
-    memo: '계약금 50%',
-  },
-  {
-    id: 'rec-2',
-    projectId: 'proj-8',
-    date: '2025-07-15',
-    amount: 7110254,
+    amount: 3000000,
     memo: '선금',
   },
   {
+    id: 'rec-2',
+    projectId: 'proj-6',
+    date: '2025-09-10',
+    amount: 4000000,
+    memo: '중도금',
+  },
+  // proj-8
+  {
     id: 'rec-3',
+    projectId: 'proj-8',
+    date: '2025-07-15',
+    amount: 5000000,
+    memo: '선금',
+  },
+  {
+    id: 'rec-4',
+    projectId: 'proj-8',
+    date: '2025-08-10',
+    amount: 6000000,
+    memo: '중도금',
+  },
+  {
+    id: 'rec-5',
+    projectId: 'proj-8',
+    date: '2025-09-05',
+    amount: 4000000,
+    memo: '잔금',
+  },
+  // proj-9
+  {
+    id: 'rec-6',
     projectId: 'proj-9',
     date: '2025-07-01',
     amount: 7000000,
     memo: '선금 50%',
+  },
+  {
+    id: 'rec-7',
+    projectId: 'proj-9',
+    date: '2025-07-20',
+    amount: 7000000,
+    memo: '잔금 50%',
+  },
+  // proj-7
+  {
+    id: 'rec-8',
+    projectId: 'proj-7',
+    date: '2024-12-28',
+    amount: 24000000,
+    memo: '선금',
+  },
+  {
+    id: 'rec-9',
+    projectId: 'proj-7',
+    date: '2025-01-15',
+    amount: 24500000,
+    memo: '잔금',
   },
 ];
 

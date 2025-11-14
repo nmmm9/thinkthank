@@ -1,6 +1,12 @@
-# 프로젝트 성과분석 및 리워드 계산 시스템
+# CO.UP - 프로젝트 성과 관리 시스템
 
-회사 내 프로젝트별 성과분석 및 리워드 계산을 위한 웹 애플리케이션입니다.
+에이전시 맞춤형 성과 측정 및 리워드 계산 시스템입니다.
+
+## 🚀 배포 가능 상태
+
+✅ **백엔드 없이 배포 가능** - 모든 데이터가 프론트엔드에 내장됨
+✅ **Vercel, Netlify, Cloudflare Pages 지원**
+✅ **정적 빌드 완료** - 즉시 배포 가능
 
 ## 기능
 
@@ -42,6 +48,20 @@ npm run dev
 ```
 
 브라우저에서 [http://localhost:3000](http://localhost:3000)을 열어서 확인하세요.
+
+포트 3002로 실행하려면:
+```bash
+npm run dev -- -p 3002
+```
+
+### 로그인 정보 (개발용)
+
+빠른 로그인 버튼 사용 또는 아래 계정 정보 입력:
+- **CEO**: `admin@rewarding.com`
+- **팀장**: `ooo.think.jh@gmail.com`
+- **일반사원**: `ooo.think.lhj@gmail.com`
+
+(비밀번호는 더미 데이터이므로 아무 값이나 입력)
 
 ### 빌드
 
@@ -102,6 +122,44 @@ project-reward-system/
 - 1일 판관비 = (운영비 × 연봉비중) ÷ 근무가능일수
 - 1일 투입비 = 매출원가 + 판관비
 - 성과 = 팀원 계약금 – 총투입비용
+
+## 🌐 배포하기
+
+### Vercel로 배포 (추천, 가장 쉬움)
+
+1. **GitHub에 프로젝트 업로드**
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/your-username/your-repo.git
+git push -u origin main
+```
+
+2. **Vercel 배포**
+   - [Vercel](https://vercel.com)에 접속
+   - "Import Project" 클릭
+   - GitHub 리포지토리 선택
+   - 자동 배포 완료! (약 2분 소요)
+
+### Netlify로 배포
+
+1. GitHub에 프로젝트 업로드 (위와 동일)
+2. [Netlify](https://www.netlify.com)에 접속
+3. "Add new site" > "Import an existing project" 선택
+4. GitHub 리포지토리 연결
+5. Build 설정:
+   - Build command: `npm run build`
+   - Publish directory: `.next`
+6. Deploy 클릭
+
+### 배포 후 확인사항
+
+✅ 로그인 페이지가 정상적으로 보이는지 확인
+✅ 빠른 로그인 버튼으로 로그인 테스트
+✅ 모든 페이지 접근 가능 여부 확인
+✅ 데이터가 정상적으로 표시되는지 확인
 
 ## 데이터베이스 연동
 

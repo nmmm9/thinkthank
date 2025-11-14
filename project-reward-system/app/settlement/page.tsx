@@ -7,7 +7,7 @@ import Modal from '@/components/Modal';
 import { AddButton, EditButton, SaveButton, DeleteButton } from '@/components/ActionButtons';
 import { projects, receipts, projectCategories } from '@/mocks/data';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Plus } from 'lucide-react';
+import { CheckCircle, XCircle, Plus, Star } from 'lucide-react';
 
 export default function SettlementPage() {
   const [selectedYear, setSelectedYear] = useState('2025');
@@ -68,12 +68,35 @@ export default function SettlementPage() {
       operatingProfit,
       profitRate,
       remainingBalance,
+      totalReceived,
     };
+  };
+
+  // 입금 단계 태그 목록 생성 (더미 로직)
+  const getPaymentStageTags = (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return [];
+
+    const tags: Array<'선금' | '중도금' | '잔금'> = [];
+    const totals = calculateTotals(projectId);
+    const receivedRatio = (totals.totalReceived / project.contractAmount) * 100;
+
+    // 간단한 로직: 입금 비율에 따라 태그 추가
+    if (receivedRatio > 0) tags.push('선금');
+    if (receivedRatio > 30) tags.push('중도금');
+    if (receivedRatio > 60) tags.push('잔금');
+
+    return tags;
   };
 
   return (
     <div>
       <PageHeader title="정산" description="프로젝트에 대한 정산 취합입니다." />
+
+      {/* 상단 안내 문구 */}
+      <div className="mb-6 bg-blue-500 text-white px-6 py-3 rounded-lg inline-block">
+        <p className="text-sm font-medium">프로젝트 정산 현황 및 담당자의 확인</p>
+      </div>
 
       <FilterBar onSearch={() => console.log('Search')}>
         <FilterSelect
@@ -118,40 +141,39 @@ export default function SettlementPage() {
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="px-4 py-3 text-left font-medium text-gray-700">프로젝트명</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">계약일자</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">
-                계약종료일자
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">현황</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">유형</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-40">
+                계약기간
               </th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">구분</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">현태</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">입금단계</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">확정</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">계약금</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">지출총액</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-48">
+                지급 총액
+              </th>
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-40">
                 영업이익 (%)
               </th>
-              <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">잔금</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-20">상세</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {projects.map((project) => {
               const totals = calculateTotals(project.id);
               const category = projectCategories.find((c) => c.id === project.categoryId);
+              const paymentTags = getPaymentStageTags(project.id);
 
               return (
                 <tr key={project.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-700">{project.name}</td>
-                  <td className="px-4 py-3 text-center text-gray-700">
-                    {format(new Date(project.startDate), 'yyyy-MM-dd')}
+                  {/* 프로젝트명 + 별표 */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <button className="text-gray-400 hover:text-yellow-500 transition-colors">
+                        <Star className="w-4 h-4" />
+                      </button>
+                      <span className="text-gray-700">{project.name}</span>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-center text-gray-700">
-                    {format(new Date(project.endDate), 'yyyy-MM-dd')}
-                  </td>
-                  <td className="px-4 py-3 text-center text-gray-700">
-                    {category?.name || '-'}
-                  </td>
+
+                  {/* 현황 */}
                   <td className="px-4 py-3 text-center">
                     <span
                       className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(
@@ -161,55 +183,56 @@ export default function SettlementPage() {
                       {getStatusLabel(project.status)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    {project.paymentStage ? (
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${getPaymentStageColor(
-                          project.paymentStage
-                        )}`}
-                      >
-                        {project.paymentStage}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400 text-xs">-</span>
-                    )}
+
+                  {/* 유형 */}
+                  <td className="px-4 py-3 text-center text-gray-700">
+                    {category?.name || '-'}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    {project.confirmed ? (
-                      <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />
-                    ) : (
-                      <XCircle className="w-5 h-5 text-red-500 mx-auto" />
-                    )}
+
+                  {/* 계약기간 */}
+                  <td className="px-4 py-3 text-center text-gray-700 text-xs">
+                    {format(new Date(project.startDate), 'yyyy/MM/dd')} ~{' '}
+                    {format(new Date(project.endDate), 'yyyy/MM/dd')}
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-700">
-                    ₩{project.contractAmount.toLocaleString()}
+
+                  {/* 계약금 */}
+                  <td className="px-4 py-3 text-right text-gray-700 font-medium">
+                    {project.contractAmount.toLocaleString()}원
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-700">
-                    ₩{totals.totalExpense.toLocaleString()}
+
+                  {/* 지급 총액 (여러 태그) */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                      {paymentTags.map((tag) => (
+                        <span
+                          key={tag}
+                          className={`px-2 py-1 rounded text-xs font-medium ${getPaymentStageColor(
+                            tag
+                          )}`}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                      {paymentTags.length === 0 && (
+                        <span className="text-gray-400 text-xs">입금</span>
+                      )}
+                    </div>
                   </td>
+
+                  {/* 영업이익 (금액 + %) */}
                   <td className="px-4 py-3 text-right">
-                    <span
-                      className={`${
-                        totals.operatingProfit < 0 ? 'text-red-600' : 'text-black'
-                      }`}
-                    >
-                      ₩{totals.operatingProfit.toLocaleString()} ({totals.profitRate}%)
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700">
-                    ₩{totals.remainingBalance.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => {
-                        setSelectedProjectId(project.id);
-                        setShowReceiptModal(true);
-                      }}
-                      className="p-2 text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                    <EditButton onClick={() => console.log('Edit')} />
+                    <div className="flex flex-col items-end">
+                      <span
+                        className={`font-bold ${
+                          totals.operatingProfit < 0 ? 'text-red-600' : 'text-gray-900'
+                        }`}
+                      >
+                        {totals.profitRate}%
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {totals.operatingProfit.toLocaleString()}원
+                      </span>
+                    </div>
                   </td>
                 </tr>
               );
