@@ -4,6 +4,7 @@ const nextConfig = {
   output: 'export',
   basePath: '/thinkthank',
   assetPrefix: '/thinkthank',
+  trailingSlash: true,
 
   // 배포 최적화
   eslint: {
