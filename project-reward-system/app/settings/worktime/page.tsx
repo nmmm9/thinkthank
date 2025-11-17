@@ -3,10 +3,10 @@
 import { useState } from 'react';
 import PageHeader from '@/components/PageHeader';
 import { AddButton, SaveButton } from '@/components/ActionButtons';
-import { holidays, workTimeSetting } from '@/mocks/data';
+import { holidays, workTimeSettings } from '@/mocks/data';
 
 export default function WorkTimePage() {
-  const [workMinutes, setWorkMinutes] = useState(workTimeSetting.workMinutesPerDay);
+  const [workMinutes, setWorkMinutes] = useState(workTimeSettings.workMinutesPerDay);
 
   return (
     <div>

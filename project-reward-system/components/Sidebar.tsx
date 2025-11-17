@@ -13,7 +13,7 @@ import {
   LogOut,
   ChevronLeft,
 } from 'lucide-react';
-import { useAuthStore, getLevelLabel } from '@/lib/auth-store';
+import { useAuthStore } from '@/lib/auth-store';
 import { useSidebarStore } from '@/lib/sidebar-store';
 import { teams, positions } from '@/mocks/data';
 

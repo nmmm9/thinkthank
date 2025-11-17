@@ -5,7 +5,6 @@ import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect } from '@/components/FilterBar';
 import { SaveButton, DeleteButton } from '@/components/ActionButtons';
 import { opexes } from '@/mocks/data';
-import { Search } from 'lucide-react';
 
 export default function OpexPage() {
   const [selectedYear, setSelectedYear] = useState('연도 - 전체');

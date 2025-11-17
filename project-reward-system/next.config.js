@@ -3,6 +3,7 @@ const nextConfig = {
   // GitHub Pages 배포 설정
   output: 'export',
   basePath: '/thinkthank',
+  assetPrefix: '/thinkthank',
 
   // 배포 최적화
   eslint: {

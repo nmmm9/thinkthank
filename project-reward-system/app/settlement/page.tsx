@@ -4,10 +4,10 @@ import { useState } from 'react';
 import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import Modal from '@/components/Modal';
-import { AddButton, EditButton, SaveButton, DeleteButton } from '@/components/ActionButtons';
+import { SaveButton, DeleteButton } from '@/components/ActionButtons';
 import { projects, receipts, projectCategories } from '@/mocks/data';
 import { format } from 'date-fns';
-import { CheckCircle, XCircle, Plus, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 
 export default function SettlementPage() {
   const [selectedYear, setSelectedYear] = useState('2025');

@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuthStore, getLevelLabel } from '@/lib/auth-store';
+import { useAuthStore } from '@/lib/auth-store';
 import { members } from '@/mocks/data';
-import { LogIn } from 'lucide-react';
 
 export default function LoginPage() {
   const [loginId, setLoginId] = useState('');
