@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { projects, teams } from '@/mocks/data';
+import { projects, teams, schedules } from '@/mocks/data';
+import { useAuthStore } from '@/lib/auth-store';
 import {
   format,
   startOfMonth,
@@ -19,6 +20,7 @@ import { ko } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Eye, EyeOff } from 'lucide-react';
 
 export default function SchedulesPage() {
+  const { user } = useAuthStore();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [visibleProjects, setVisibleProjects] = useState<Record<string, boolean>>(
@@ -69,21 +71,41 @@ export default function SchedulesPage() {
     }));
   };
 
-  const calculateProgress = (project: typeof projects[0]) => {
-    const start = new Date(project.startDate);
-    const end = new Date(project.endDate);
-    const today = new Date();
+  // 특정 날짜에 특정 사용자가 특정 프로젝트에 투입한 시간의 퍼센트 계산
+  const getDailyProjectPercentage = (projectId: string, date: Date, userId: string) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
 
-    if (today < start) return 0;
-    if (today > end) return 100;
+    // 해당 날짜의 해당 사용자의 모든 스케줄
+    const daySchedules = schedules.filter(
+      (s) => s.memberId === userId && s.date === dateStr
+    );
 
-    const total = differenceInDays(end, start);
-    const elapsed = differenceInDays(today, start);
+    // 해당 날짜의 총 투입 시간
+    const totalMinutes = daySchedules.reduce((sum, s) => sum + s.minutes, 0);
 
-    return Math.round((elapsed / total) * 100);
+    if (totalMinutes === 0) return 0;
+
+    // 해당 프로젝트에 투입한 시간
+    const projectMinutes = daySchedules
+      .filter((s) => s.projectId === projectId)
+      .reduce((sum, s) => sum + s.minutes, 0);
+
+    // 퍼센트 계산
+    return Math.round((projectMinutes / totalMinutes) * 100);
   };
 
-  const getProjectPosition = (project: typeof projects[0], displayDays: Date[]) => {
+  // 특정 날짜에 사용자가 작업한 프로젝트 목록
+  const getDayProjects = (date: Date, userId: string) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const daySchedules = schedules.filter(
+      (s) => s.memberId === userId && s.date === dateStr && s.minutes > 0
+    );
+
+    return daySchedules.map((s) => s.projectId);
+  };
+
+  // 프로젝트를 여러 행으로 나누는 함수 (각 주마다 별도의 바)
+  const getProjectBars = (project: typeof projects[0], displayDays: Date[]) => {
     const startDate = new Date(project.startDate);
     const endDate = new Date(project.endDate);
 
@@ -91,14 +113,36 @@ export default function SchedulesPage() {
     const lastDay = displayDays[displayDays.length - 1];
 
     if (endDate < firstDay || startDate > lastDay) {
-      return null;
+      return [];
     }
 
-    const startCol = Math.max(0, differenceInDays(startDate, firstDay));
-    const endCol = Math.min(displayDays.length - 1, differenceInDays(endDate, firstDay));
-    const width = endCol - startCol + 1;
+    const actualStart = startDate < firstDay ? firstDay : startDate;
+    const actualEnd = endDate > lastDay ? lastDay : endDate;
 
-    return { startCol, width };
+    const bars = [];
+    let currentDate = actualStart;
+
+    while (currentDate <= actualEnd) {
+      const dayIndex = differenceInDays(currentDate, firstDay);
+      const rowIndex = Math.floor((dayIndex + monthStart.getDay()) / 7);
+      const colInRow = (dayIndex + monthStart.getDay()) % 7;
+
+      // 이 행의 마지막 날까지 또는 프로젝트 종료일까지
+      const daysLeftInRow = 7 - colInRow;
+      const daysLeftInProject = differenceInDays(actualEnd, currentDate) + 1;
+      const barWidth = Math.min(daysLeftInRow, daysLeftInProject);
+
+      bars.push({
+        row: rowIndex,
+        col: colInRow,
+        width: barWidth,
+      });
+
+      // 다음 행의 시작으로 이동
+      currentDate = addDays(currentDate, barWidth);
+    }
+
+    return bars;
   };
 
   return (
@@ -174,7 +218,6 @@ export default function SchedulesPage() {
           <h3 className="text-base font-semibold text-gray-900 mb-3">진행 중인 프로젝트</h3>
           <div className="space-y-2">
             {activeProjects.map((project) => {
-              const progress = calculateProgress(project);
               return (
                 <div
                   key={project.id}
@@ -275,56 +318,80 @@ export default function SchedulesPage() {
               </div>
 
               <div className="grid grid-cols-7 gap-4">
-                {weekDays.map((day) => (
-                  <div key={format(day, 'yyyy-MM-dd')} className="flex flex-col">
-                    {/* 날짜 헤더 */}
-                    <div className="text-center mb-3 pb-3 border-b border-gray-200">
-                      <div className="text-xs text-gray-500 mb-1">
-                        {format(day, 'EEE', { locale: ko })} {format(day, 'd')}
+                {weekDays.map((day) => {
+                  const dateStr = format(day, 'yyyy-MM-dd');
+                  const dayProjects = user ? getDayProjects(day, user.id) : [];
+
+                  return (
+                    <div key={format(day, 'yyyy-MM-dd')} className="flex flex-col">
+                      {/* 날짜 헤더 */}
+                      <div className="text-center mb-3 pb-3 border-b border-gray-200">
+                        <div className="text-xs text-gray-500 mb-1">
+                          {format(day, 'EEE', { locale: ko })} {format(day, 'd')}
+                        </div>
+                        {isToday(day) && (
+                          <div className="text-xs text-blue-600 font-medium">오늘</div>
+                        )}
                       </div>
-                      {isToday(day) && (
-                        <div className="text-xs text-blue-600 font-medium">오늘</div>
-                      )}
+
+                      {/* 세로 막대 그래프 - 위에서 아래로 */}
+                      <div className="flex flex-col items-center flex-1">
+                        <div className="relative w-full h-[500px] bg-gray-50 rounded-lg border border-gray-200 flex flex-col">
+                          {/* 8시간(480분) = 100% */}
+                          {user &&
+                            dayProjects.map((projectId, idx) => {
+                              if (!visibleProjects[projectId]) return null;
+
+                              const project = projects.find((p) => p.id === projectId);
+                              if (!project) return null;
+
+                              const daySchedule = schedules.find(
+                                (s) => s.memberId === user.id && s.date === dateStr && s.projectId === projectId
+                              );
+                              const minutes = daySchedule?.minutes || 0;
+                              const percentage = (minutes / 480) * 100; // 480분 = 8시간
+                              const hours = Math.floor(minutes / 60);
+                              const mins = minutes % 60;
+
+                              return (
+                                <div
+                                  key={projectId}
+                                  className={`w-full ${getProjectColor(
+                                    projectId
+                                  )} border-b border-gray-300 relative group cursor-pointer transition-all hover:brightness-95`}
+                                  style={{
+                                    height: `${percentage}%`,
+                                  }}
+                                >
+                                  {/* 퍼센트 표시 */}
+                                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <div className="text-2xl font-bold text-gray-900">
+                                      {Math.round(percentage)}%
+                                    </div>
+                                    <div className="text-xs text-gray-600">
+                                      {hours > 0 && `${hours}시간`}
+                                      {mins > 0 && ` ${mins}분`}
+                                    </div>
+                                  </div>
+
+                                  {/* 툴팁 (호버 시) */}
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block z-10">
+                                    <div className="bg-gray-900 text-white text-xs rounded py-2 px-3 whitespace-nowrap">
+                                      <div className="font-medium mb-1">{project.name}</div>
+                                      <div>
+                                        {hours > 0 && `${hours}시간 `}
+                                        {mins > 0 && `${mins}분`}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
                     </div>
-
-                    {/* 프로젝트 바 */}
-                    <div className="relative flex-1 min-h-[400px] flex flex-col gap-2">
-                      {activeProjects
-                        .filter((p) => visibleProjects[p.id])
-                        .map((project) => {
-                          const start = new Date(project.startDate);
-                          const end = new Date(project.endDate);
-
-                          if (day < start || day > end) return null;
-
-                          const progress = calculateProgress(project);
-                          const team = teams.find((t) => t.id === project.teamId);
-
-                          return (
-                            <div
-                              key={project.id}
-                              className={`${getProjectColor(
-                                project.id
-                              )} rounded-lg p-3 shadow-sm border border-gray-300`}
-                            >
-                              <div className="text-xs font-medium text-gray-900 mb-1 truncate">
-                                {project.name}
-                              </div>
-                              <div className="text-xs text-gray-600 mb-2 truncate">
-                                {team?.name || '팀 없음'}
-                              </div>
-                              <div className="text-2xl font-bold text-gray-900 mb-1">
-                                {progress}%
-                              </div>
-                              <div className="text-xs text-gray-500">
-                                {format(start, 'M/d')} ~ {format(end, 'M/d')}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (
@@ -384,43 +451,43 @@ export default function SchedulesPage() {
                     ))}
                   </div>
 
-                  {/* 프로젝트 바 (절대 위치) */}
+                  {/* 프로젝트 바 (절대 위치) - 여러 행으로 나뉨 */}
                   <div className="absolute top-0 left-0 right-0 pointer-events-none">
                     {activeProjects
                       .filter((p) => visibleProjects[p.id])
-                      .map((project, idx) => {
-                        const position = getProjectPosition(project, calendarDays);
-                        if (!position) return null;
+                      .map((project, projectIdx) => {
+                        const bars = getProjectBars(project, calendarDays);
+                        if (bars.length === 0) return null;
 
-                        const rowStart = Math.floor(
-                          (position.startCol + monthStart.getDay()) / 7
-                        );
-                        const team = teams.find((t) => t.id === project.teamId);
-
-                        return (
+                        return bars.map((bar, barIdx) => (
                           <div
-                            key={project.id}
+                            key={`${project.id}-${barIdx}`}
                             className={`absolute ${getProjectColor(
                               project.id
                             )} rounded px-2 py-1 text-xs font-medium shadow-sm border border-gray-300 pointer-events-auto cursor-pointer hover:shadow-md transition-shadow`}
                             style={{
-                              top: `${rowStart * 6 + 2}rem`,
-                              left: `${((position.startCol + monthStart.getDay()) % 7) * 14.285}%`,
-                              width: `${position.width * 14.285}%`,
-                              zIndex: 10 + idx,
+                              top: `${bar.row * 7 + 2.5}rem`,
+                              left: `${bar.col * 14.285}%`,
+                              width: `${bar.width * 14.285}%`,
+                              zIndex: 10 + projectIdx,
                             }}
                             title={`${project.name}\n${format(
                               new Date(project.startDate),
                               'yyyy/MM/dd'
                             )} ~ ${format(new Date(project.endDate), 'yyyy/MM/dd')}`}
                           >
-                            <div className="truncate">{project.name}</div>
-                            <div className="text-xs text-gray-600 truncate">
-                              {format(new Date(project.startDate), 'M/d')} ~{' '}
-                              {format(new Date(project.endDate), 'M/d')}
-                            </div>
+                            {/* 첫 번째 바에만 프로젝트명 표시 */}
+                            {barIdx === 0 && (
+                              <>
+                                <div className="truncate">{project.name}</div>
+                                <div className="text-xs text-gray-600 truncate">
+                                  {format(new Date(project.startDate), 'M/d')} ~{' '}
+                                  {format(new Date(project.endDate), 'M/d')}
+                                </div>
+                              </>
+                            )}
                           </div>
-                        );
+                        ));
                       })}
                   </div>
                 </div>

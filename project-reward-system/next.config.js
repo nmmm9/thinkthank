@@ -1,10 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // GitHub Pages 배포를 위한 정적 export 설정
-  output: 'export',
-
-  // GitHub Pages basePath (리포지토리 이름)
-  basePath: '/thinkthank',
+  // 로컬 개발용 설정 (배포 시 주석 해제)
+  // output: 'export',
+  // basePath: '/thinkthank',
 
   // 배포 최적화
   eslint: {

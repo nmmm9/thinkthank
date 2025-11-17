@@ -33,12 +33,3 @@ export const useAuthStore = create<AuthState>()(
   )
 );
 
-// 권한 레벨 라벨
-export const getLevelLabel = (level: string) => {
-  const labels: Record<string, string> = {
-    admin: 'CEO',
-    manager: '팀장',
-    user: '일반사원',
-  };
-  return labels[level] || level;
-};

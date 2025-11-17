@@ -4,7 +4,7 @@ import { useState } from 'react';
 import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect } from '@/components/FilterBar';
 import { SaveButton, DeleteButton } from '@/components/ActionButtons';
-import { opexList } from '@/mocks/data';
+import { opexes } from '@/mocks/data';
 import { Search } from 'lucide-react';
 
 export default function OpexPage() {
@@ -39,7 +39,7 @@ export default function OpexPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {opexList.map((opex) => (
+            {opexes.map((opex) => (
               <tr key={opex.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-center text-gray-700">{opex.yearMonth}</td>
                 <td className="px-4 py-3">

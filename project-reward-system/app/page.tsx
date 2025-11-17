@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useCallback } from 'react';
-import { projects, schedules, members, teams, positions, opexList } from '@/mocks/data';
+import { projects, schedules, members, teams, positions, opexes } from '@/mocks/data';
 import { startOfMonth, endOfMonth, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays, addDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { ArrowRight, Star } from 'lucide-react';
@@ -39,7 +39,7 @@ export default function Dashboard() {
 
           const dailyCost = member.annualSalary / (12 * 20.917);
           const yearMonth = format(scheduleDate, 'yyyy-MM');
-          const memberOpex = opexList.find((o) => o.yearMonth === yearMonth);
+          const memberOpex = opexes.find((o) => o.yearMonth === yearMonth);
           const salaryRatio = position ? 1 : 0;
           const opexAmount = memberOpex ? memberOpex.amount : 0;
           const dailyOpex = (opexAmount * salaryRatio) / 20.917;

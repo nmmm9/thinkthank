@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { projects, teams, members, opexList, schedules, positions } from '@/mocks/data';
+import { projects, teams, members, opexes, schedules, positions } from '@/mocks/data';
 import { ChevronDown, ChevronRight, Users as UsersIcon, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function PerformancePage() {
-  const [selectedYear, setSelectedYear] = useState('2024');
+  const [selectedYear, setSelectedYear] = useState('2025');
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
 
   // 프로젝트 펼치기/접기
@@ -34,7 +34,7 @@ export default function PerformancePage() {
     const salaryRatio = totalAnnualSalary > 0 ? member.annualSalary / totalAnnualSalary : 0;
 
     // 운영비 (최신)
-    const opex = opexList[0]?.amount || 16000000;
+    const opex = opexes[0]?.amount || 16000000;
 
     // 근무가능일수 (연간)
     const workingDays = 250;

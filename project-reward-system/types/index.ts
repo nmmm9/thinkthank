@@ -43,6 +43,7 @@ export interface Project {
     memberId: string;
     balancePercent: number; // 배분 비율 (%)
   }>;
+  starred?: boolean; // 즐겨찾기
   담당자?: string;
   연락처?: string;
   memo?: string;

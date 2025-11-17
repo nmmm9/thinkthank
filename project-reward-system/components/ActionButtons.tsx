@@ -12,15 +12,7 @@ export const EditButton = ({ onClick }: { onClick: () => void }) => (
   </button>
 );
 
-export const LockButton = ({ onClick }: { onClick: () => void }) => (
-  <button
-    onClick={onClick}
-    className="p-2 text-purple-600 hover:bg-purple-50 rounded transition-colors"
-    title="저장"
-  >
-    <Lock className="w-4 h-4" />
-  </button>
-);
+
 
 export const SaveButton = ({ onClick }: { onClick: () => void }) => (
   <button
