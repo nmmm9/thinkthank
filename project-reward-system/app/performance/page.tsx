@@ -163,11 +163,6 @@ export default function PerformancePage() {
                       </p>
                     </div>
                   </div>
-                  {project.confirmed && (
-                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                      관련 벌도에요
-                    </span>
-                  )}
                 </div>
                 <div className="text-right">
                   <div className="text-2xl font-bold text-gray-900">

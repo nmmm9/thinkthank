@@ -43,9 +43,9 @@ const Sidebar = () => {
 
   const isActive = (href: string) => {
     if (href === '/') {
-      return pathname === '/';
+      return pathname === '/' || pathname === '/thinkthank' || pathname === '/thinkthank/';
     }
-    return pathname.startsWith(href);
+    return pathname.includes(href);
   };
 
   const userTeam = user ? teams.find((t) => t.id === user.teamId) : null;

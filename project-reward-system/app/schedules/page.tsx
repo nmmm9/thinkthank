@@ -136,6 +136,7 @@ export default function SchedulesPage() {
         row: rowIndex,
         col: colInRow,
         width: barWidth,
+        startDate: currentDate,
       });
 
       // 다음 행의 시작으로 이동
@@ -143,6 +144,21 @@ export default function SchedulesPage() {
     }
 
     return bars;
+  };
+
+  // 각 날짜별로 프로젝트를 레이어(층)로 배치
+  const getProjectLayer = (project: typeof projects[0], barStartDate: Date, visibleProjectsList: typeof projects) => {
+    const dateStr = format(barStartDate, 'yyyy-MM-dd');
+
+    // 해당 날짜에 시작하는 다른 프로젝트들 찾기
+    const projectsOnSameDay = visibleProjectsList.filter((p) => {
+      const pStart = new Date(p.startDate);
+      const pEnd = new Date(p.endDate);
+      return barStartDate >= pStart && barStartDate <= pEnd;
+    });
+
+    // 현재 프로젝트의 인덱스 반환 (레이어로 사용)
+    return projectsOnSameDay.findIndex((p) => p.id === project.id);
   };
 
   return (
@@ -459,35 +475,37 @@ export default function SchedulesPage() {
                         const bars = getProjectBars(project, calendarDays);
                         if (bars.length === 0) return null;
 
-                        return bars.map((bar, barIdx) => (
-                          <div
-                            key={`${project.id}-${barIdx}`}
-                            className={`absolute ${getProjectColor(
-                              project.id
-                            )} rounded px-2 py-1 text-xs font-medium shadow-sm border border-gray-300 pointer-events-auto cursor-pointer hover:shadow-md transition-shadow`}
-                            style={{
-                              top: `${bar.row * 7 + 2.5}rem`,
-                              left: `${bar.col * 14.285}%`,
-                              width: `${bar.width * 14.285}%`,
-                              zIndex: 10 + projectIdx,
-                            }}
-                            title={`${project.name}\n${format(
-                              new Date(project.startDate),
-                              'yyyy/MM/dd'
-                            )} ~ ${format(new Date(project.endDate), 'yyyy/MM/dd')}`}
-                          >
-                            {/* 첫 번째 바에만 프로젝트명 표시 */}
-                            {barIdx === 0 && (
-                              <>
-                                <div className="truncate">{project.name}</div>
-                                <div className="text-xs text-gray-600 truncate">
-                                  {format(new Date(project.startDate), 'M/d')} ~{' '}
-                                  {format(new Date(project.endDate), 'M/d')}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        ));
+                        const visibleProjectsList = activeProjects.filter((p) => visibleProjects[p.id]);
+
+                        return bars.map((bar, barIdx) => {
+                          const layer = getProjectLayer(project, bar.startDate, visibleProjectsList);
+                          const barHeight = 1.5; // rem 단위
+
+                          return (
+                            <div
+                              key={`${project.id}-${barIdx}`}
+                              className={`absolute ${getProjectColor(
+                                project.id
+                              )} rounded px-2 py-0.5 text-xs font-medium shadow-sm border border-gray-300 pointer-events-auto cursor-pointer hover:shadow-md transition-shadow overflow-hidden`}
+                              style={{
+                                top: `${bar.row * 7 + 2 + layer * barHeight}rem`,
+                                left: `${bar.col * 14.285}%`,
+                                width: `${bar.width * 14.285}%`,
+                                height: `${barHeight}rem`,
+                                zIndex: 10 + layer,
+                              }}
+                              title={`${project.name}\n${format(
+                                new Date(project.startDate),
+                                'yyyy/MM/dd'
+                              )} ~ ${format(new Date(project.endDate), 'yyyy/MM/dd')}`}
+                            >
+                              {/* 첫 번째 바에만 프로젝트명 표시 */}
+                              {barIdx === 0 && (
+                                <div className="truncate leading-tight">{project.name}</div>
+                              )}
+                            </div>
+                          );
+                        });
                       })}
                   </div>
                 </div>

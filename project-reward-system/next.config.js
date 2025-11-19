@@ -1,10 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // GitHub Pages 배포 설정
-  output: 'export',
-  basePath: '/thinkthank',
-  assetPrefix: '/thinkthank',
-  trailingSlash: true,
+  // GitHub Pages 배포 설정 (배포할 때만 주석 해제)
+  // output: 'export',
+  // basePath: '/thinkthank',
+  // assetPrefix: '/thinkthank',
+  // trailingSlash: true,
 
   // 배포 최적화
   eslint: {

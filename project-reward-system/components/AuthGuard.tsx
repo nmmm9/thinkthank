@@ -8,38 +8,36 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    // Hydration 완료 대기
-    setIsLoading(false);
-  }, []);
+    const isLoginPage = pathname === '/login';
 
-  useEffect(() => {
-    if (isLoading) return;
-
-    // 로그인 페이지는 체크 안함
-    if (pathname === '/login') {
-      // 이미 로그인된 경우 대시보드로
-      if (isAuthenticated) {
-        router.push('/');
-      }
+    // 로그인 페이지에서 이미 로그인된 경우 대시보드로
+    if (isLoginPage && isAuthenticated) {
+      router.push('/');
       return;
     }
 
     // 로그인 안된 경우 로그인 페이지로
-    if (!isAuthenticated) {
+    if (!isLoginPage && !isAuthenticated) {
       router.push('/login');
+      return;
     }
-  }, [isAuthenticated, pathname, router, isLoading]);
 
-  // Hydration 중이거나 로그인 페이지는 그대로 표시
-  if (isLoading || pathname === '/login') {
+    // 체크 완료
+    setIsChecking(false);
+  }, [isAuthenticated, pathname, router]);
+
+  const isLoginPage = pathname === '/login';
+
+  // 로그인 페이지는 항상 표시
+  if (isLoginPage) {
     return <>{children}</>;
   }
 
-  // 로그인 안된 경우 아무것도 표시하지 않음 (리다이렉트 중)
-  if (!isAuthenticated) {
+  // 체크 중이거나 로그인 안된 경우 로딩 표시
+  if (isChecking || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
