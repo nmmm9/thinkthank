@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { getProjects, getTeams, getMembers, getOpexList, getSchedules, getPositions } from '@/lib/api';
-import type { Project, Team, Schedule, Position, Opex, MemberWithRelations } from '@/lib/supabase/database.types';
+import { getProjects, getTeams, getMembers, getOpexList } from '@/lib/api';
+import type { Project, Team, Opex, MemberWithRelations } from '@/lib/supabase/database.types';
 import { ChevronDown, ChevronRight, Users as UsersIcon, Briefcase } from 'lucide-react';
 import { format } from 'date-fns';
 import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
@@ -14,24 +14,21 @@ export default function PerformancePage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [projectsData, teamsData, membersData, opexData, schedulesData] = await Promise.all([
+        const [projectsData, teamsData, membersData, opexData] = await Promise.all([
           getProjects(),
           getTeams(),
           getMembers(),
           getOpexList(),
-          getSchedules(),
         ]);
         setProjects(projectsData);
         setTeams(teamsData);
         setMembers(membersData);
         setOpexes(opexData);
-        setSchedules(schedulesData);
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -49,40 +46,35 @@ export default function PerformancePage() {
     }));
   };
 
-  // 성과 계산 (새로운 공식)
+  // 성과 계산 (allocations의 planned_days 기준)
   // 1. 판관비 = 운영비 - 전체 월급 합계
   // 2. 1인 판관비 = 판관비 × (개인연봉 / 전체연봉) / 해당월 근무일수
   // 3. 1일 매출원가 = 연봉 / 12 / 해당월 근무일수
-  const calculateMemberPerformance = (memberId: string, projectId: string) => {
-    const member = members.find((m) => m.id === memberId);
-    const project = projects.find((p) => p.id === projectId);
+  const calculateMemberPerformance = (allocation: any) => {
+    const member = members.find((m) => m.id === allocation.member_id);
+    const project = projects.find((p) => p.id === allocation.project_id);
 
     if (!member || !project) return null;
 
-    // 해당 멤버의 프로젝트 스케줄
-    const memberSchedules = schedules.filter(
-      (s) => s.member_id === memberId && s.project_id === projectId
-    );
+    // allocation에서 투입일수 가져오기
+    const plannedDays = allocation.planned_days || 0;
 
-    if (memberSchedules.length === 0) {
-      // 스케줄이 없으면 기본값 반환
-      const allocation = project.member_allocations?.find((a: any) => a.member_id === memberId);
-      const memberContractAmount = allocation
-        ? (project.contract_amount * allocation.balance_percent) / 100
-        : 0;
-
+    if (plannedDays === 0) {
       return {
         memberName: member.name,
-        memberContractAmount,
         dailyCost: 0,
         dailyOpex: 0,
         dailyTotalCost: 0,
         actualDays: 0,
         totalInvestment: 0,
-        performance: Math.round(memberContractAmount),
-        participationRate: allocation?.balance_percent || 0,
       };
     }
+
+    // 프로젝트 시작월 기준으로 계산 (allocation의 start_date 또는 project의 start_date)
+    const startDate = allocation.start_date || project.start_date;
+    const yearMonth = getYearMonthFromDate(startDate);
+    const [year, month] = yearMonth.split('-').map(Number);
+    const workingDaysInMonth = getWorkingDaysInMonth(year, month);
 
     // 활성 멤버들의 총 연봉
     const activeMembers = members.filter((m) => m.is_active && m.is_approved);
@@ -94,112 +86,68 @@ export default function PerformancePage() {
     // 개인 연봉 비중
     const salaryRatio = totalAnnualSalary > 0 ? member.annual_salary / totalAnnualSalary : 0;
 
-    // 월별로 비용 계산 후 합산
-    // 스케줄을 월별로 그룹화
-    const schedulesByMonth: { [yearMonth: string]: { minutes: number } } = {};
-    memberSchedules.forEach((s) => {
-      const yearMonth = getYearMonthFromDate(s.date);
-      if (!schedulesByMonth[yearMonth]) {
-        schedulesByMonth[yearMonth] = { minutes: 0 };
-      }
-      schedulesByMonth[yearMonth].minutes += s.minutes;
-    });
+    // 해당 월의 운영비 찾기
+    const monthOpex = opexes.find((o) => o.year_month === yearMonth);
+    const opexAmount = monthOpex?.amount || opexes[0]?.amount || 16000000;
 
-    let totalDailyCost = 0;
-    let totalDailyOpex = 0;
-    let totalActualDays = 0;
-    let totalInvestment = 0;
+    // 판관비 = 운영비 - 전체 월급
+    const adminExpense = Math.max(0, opexAmount - totalMonthlySalary);
 
-    // 각 월별로 계산
-    Object.entries(schedulesByMonth).forEach(([yearMonth, data]) => {
-      const [year, month] = yearMonth.split('-').map(Number);
-      const workingDaysInMonth = getWorkingDaysInMonth(year, month);
-
-      // 해당 월의 운영비 찾기
-      const monthOpex = opexes.find((o) => o.year_month === yearMonth);
-      const opexAmount = monthOpex?.amount || opexes[0]?.amount || 16000000;
-
-      // 판관비 = 운영비 - 전체 월급
-      const adminExpense = Math.max(0, opexAmount - totalMonthlySalary);
-
-      // 1일 1인 판관비 = 판관비 × 연봉비중 / 해당월 근무일수
-      const dailyOpex = workingDaysInMonth > 0
-        ? (adminExpense * salaryRatio) / workingDaysInMonth
-        : 0;
-
-      // 1일 매출원가 = 연봉 / 12 / 해당월 근무일수
-      const dailyCost = workingDaysInMonth > 0
-        ? (member.annual_salary / 12) / workingDaysInMonth
-        : 0;
-
-      // 1일 투입비
-      const dailyTotalCost = dailyCost + dailyOpex;
-
-      // 해당 월의 참여일수 (분 → 일)
-      const daysInMonth = data.minutes / 480;
-
-      // 해당 월의 투입비용
-      const monthInvestment = dailyTotalCost * daysInMonth;
-
-      // 누적
-      totalDailyCost += dailyCost * daysInMonth;
-      totalDailyOpex += dailyOpex * daysInMonth;
-      totalActualDays += daysInMonth;
-      totalInvestment += monthInvestment;
-    });
-
-    // 평균 1일 비용 계산 (표시용)
-    const avgDailyCost = totalActualDays > 0 ? totalDailyCost / totalActualDays : 0;
-    const avgDailyOpex = totalActualDays > 0 ? totalDailyOpex / totalActualDays : 0;
-    const avgDailyTotalCost = avgDailyCost + avgDailyOpex;
-
-    // 팀원 계약금 (배분 비율에 따라)
-    const allocation = project.member_allocations?.find((a: any) => a.member_id === memberId);
-    const memberContractAmount = allocation
-      ? (project.contract_amount * allocation.balance_percent) / 100
+    // 1일 1인 판관비 = 판관비 × 연봉비중 / 해당월 근무일수
+    const dailyOpex = workingDaysInMonth > 0
+      ? (adminExpense * salaryRatio) / workingDaysInMonth
       : 0;
 
-    // 성과
-    const performance = memberContractAmount - totalInvestment;
+    // 1일 매출원가 = 연봉 / 12 / 해당월 근무일수
+    const dailyCost = workingDaysInMonth > 0
+      ? (member.annual_salary / 12) / workingDaysInMonth
+      : 0;
+
+    // 1일 투입비
+    const dailyTotalCost = dailyCost + dailyOpex;
+
+    // 총 투입비용 = 1일 투입비 × 투입일수
+    const totalInvestment = dailyTotalCost * plannedDays;
 
     return {
       memberName: member.name,
-      memberContractAmount,
-      dailyCost: Math.round(avgDailyCost),
-      dailyOpex: Math.round(avgDailyOpex),
-      dailyTotalCost: Math.round(avgDailyTotalCost),
-      actualDays: Math.round(totalActualDays * 10) / 10,
+      dailyCost: Math.round(dailyCost),
+      dailyOpex: Math.round(dailyOpex),
+      dailyTotalCost: Math.round(dailyTotalCost),
+      actualDays: plannedDays,
       totalInvestment: Math.round(totalInvestment),
-      performance: Math.round(performance),
-      participationRate: allocation?.balance_percent || 0,
     };
   };
 
   // 프로젝트별 성과 계산
   const projectPerformances = useMemo(() => {
     return projects.map((project) => {
-      const allocations = project.member_allocations || [];
+      // API에서는 allocations로 조인됨
+      const allocations = (project as any).allocations || [];
       const memberPerfs = allocations
-        .map((allocation: any) => calculateMemberPerformance(allocation.member_id, project.id))
-        .filter((p) => p !== null);
+        .map((allocation: any) => calculateMemberPerformance(allocation))
+        .filter((p: any) => p !== null);
 
-      const projectTotal = memberPerfs.reduce((sum, p) => sum + p.memberContractAmount, 0);
-      const teamTotal = memberPerfs.reduce((sum, p) => sum + p.totalInvestment, 0);
-      const performanceTotal = memberPerfs.reduce((sum, p) => sum + p.performance, 0);
+      // 계약금은 프로젝트 전체 금액
+      const contractAmount = project.contract_amount || 0;
+      // 총 투입비용 = 모든 팀원의 투입비용 합계
+      const totalInvestment = memberPerfs.reduce((sum: number, p: any) => sum + p.totalInvestment, 0);
+      // 성과 = 계약금 - 총 투입비용
+      const performance = contractAmount - totalInvestment;
 
       return {
         project,
         memberPerfs,
-        projectTotal,
-        teamTotal,
-        performanceTotal,
+        contractAmount,
+        totalInvestment,
+        performance,
       };
     });
-  }, [projects, members, schedules, opexes]);
+  }, [projects, members, opexes]);
 
   // 전체 성과 합계
   const totalPerformance = useMemo(() => {
-    return projectPerformances.reduce((sum, p) => sum + p.performanceTotal, 0);
+    return projectPerformances.reduce((sum, p) => sum + p.performance, 0);
   }, [projectPerformances]);
 
   if (isLoading) {
@@ -238,7 +186,7 @@ export default function PerformancePage() {
 
       {/* 프로젝트 목록 */}
       <div className="px-6 space-y-4">
-        {projectPerformances.map(({ project, memberPerfs, projectTotal, teamTotal, performanceTotal }) => {
+        {projectPerformances.map(({ project, memberPerfs, contractAmount, totalInvestment, performance }) => {
           const isExpanded = expandedProjects[project.id];
           const team = teams.find((t) => t.id === project.team_id);
 
@@ -271,11 +219,11 @@ export default function PerformancePage() {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold text-gray-900">
-                    {performanceTotal.toLocaleString()}원
+                  <div className={`text-2xl font-bold ${performance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {performance.toLocaleString()}원
                   </div>
                   <div className="text-sm text-gray-500 mt-1">
-                    계약금 {projectTotal.toLocaleString()}원
+                    계약금 {contractAmount.toLocaleString()}원 - 투입비 {totalInvestment.toLocaleString()}원
                   </div>
                 </div>
               </div>
@@ -284,23 +232,31 @@ export default function PerformancePage() {
               {isExpanded && (
                 <div className="border-t border-gray-200 bg-gray-50 p-6">
                   {/* 프로젝트 요약 */}
-                  <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="grid grid-cols-3 gap-4 mb-6">
                     <div className="bg-white rounded-lg p-4 border border-gray-200">
                       <div className="flex items-center gap-2 mb-2">
                         <Briefcase className="w-4 h-4 text-gray-500" />
-                        <span className="text-sm text-gray-600">프로젝트 총액</span>
+                        <span className="text-sm text-gray-600">계약금</span>
                       </div>
                       <div className="text-2xl font-bold text-gray-900">
-                        {projectTotal.toLocaleString()}원
+                        {contractAmount.toLocaleString()}원
                       </div>
                     </div>
                     <div className="bg-white rounded-lg p-4 border border-gray-200">
                       <div className="flex items-center gap-2 mb-2">
                         <UsersIcon className="w-4 h-4 text-gray-500" />
-                        <span className="text-sm text-gray-600">팀 총액</span>
+                        <span className="text-sm text-gray-600">총 투입비용</span>
                       </div>
                       <div className="text-2xl font-bold text-gray-900">
-                        {teamTotal.toLocaleString()}원
+                        {totalInvestment.toLocaleString()}원
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-lg p-4 border border-blue-200 bg-blue-50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm text-blue-600 font-medium">성과</span>
+                      </div>
+                      <div className={`text-2xl font-bold ${performance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                        {performance.toLocaleString()}원
                       </div>
                     </div>
                   </div>
@@ -310,38 +266,24 @@ export default function PerformancePage() {
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
-                          <th className="px-4 py-3 text-left font-medium text-gray-700">팀원 계약금</th>
-                          <th className="px-4 py-3 text-center font-medium text-gray-700">참여비율</th>
-                          <th className="px-4 py-3 text-right font-medium text-gray-700">1일 매출원가</th>
-                          <th className="px-4 py-3 text-right font-medium text-gray-700">1일 판관리비</th>
+                          <th className="px-4 py-3 text-left font-medium text-gray-700">팀원</th>
+                          <th className="px-4 py-3 text-right font-medium text-gray-700">1일 인건비</th>
+                          <th className="px-4 py-3 text-right font-medium text-gray-700">1일 판관비</th>
                           <th className="px-4 py-3 text-right font-medium text-gray-700">1일 투입비</th>
                           <th className="px-4 py-3 text-center font-medium text-gray-700">참여일수</th>
-                          <th className="px-4 py-3 text-right font-medium text-gray-700">총 투입비</th>
-                          <th className="px-4 py-3 text-right font-medium text-gray-700 bg-blue-50">
-                            성과
-                          </th>
+                          <th className="px-4 py-3 text-right font-medium text-gray-700">총 투입비용</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {memberPerfs.map((perf, idx) => (
+                        {memberPerfs.map((perf: any, idx: number) => (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs font-medium">
                                   {perf.memberName.charAt(0)}
                                 </div>
-                                <div>
-                                  <div className="font-medium text-gray-900">{perf.memberName}</div>
-                                  <div className="text-xs text-gray-500">
-                                    {perf.memberContractAmount.toLocaleString()}원
-                                  </div>
-                                </div>
+                                <div className="font-medium text-gray-900">{perf.memberName}</div>
                               </div>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium">
-                                {perf.participationRate}%
-                              </span>
                             </td>
                             <td className="px-4 py-3 text-right text-gray-700">
                               {perf.dailyCost.toLocaleString()}원
@@ -355,17 +297,8 @@ export default function PerformancePage() {
                             <td className="px-4 py-3 text-center text-gray-700">
                               {perf.actualDays}일
                             </td>
-                            <td className="px-4 py-3 text-right text-gray-700">
+                            <td className="px-4 py-3 text-right text-gray-700 font-medium">
                               {perf.totalInvestment.toLocaleString()}원
-                            </td>
-                            <td className="px-4 py-3 text-right font-bold bg-blue-50">
-                              <span
-                                className={
-                                  perf.performance >= 0 ? 'text-blue-600' : 'text-red-600'
-                                }
-                              >
-                                {perf.performance.toLocaleString()}원
-                              </span>
                             </td>
                           </tr>
                         ))}
