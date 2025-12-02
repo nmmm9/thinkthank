@@ -1,0 +1,198 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.expenses (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  project_id uuid NOT NULL,
+  date date NOT NULL,
+  amount integer NOT NULL CHECK (amount > 0),
+  category text,
+  memo text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT expenses_pkey PRIMARY KEY (id),
+  CONSTRAINT expenses_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT expenses_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
+);
+CREATE TABLE public.holidays (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  date date NOT NULL,
+  name text NOT NULL,
+  type text DEFAULT 'manual'::text CHECK (type = ANY (ARRAY['auto'::text, 'manual'::text])),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT holidays_pkey PRIMARY KEY (id),
+  CONSTRAINT holidays_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);
+CREATE TABLE public.invitations (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  email text NOT NULL,
+  role text DEFAULT 'user'::text CHECK (role = ANY (ARRAY['admin'::text, 'manager'::text, 'user'::text])),
+  invited_by uuid,
+  token text NOT NULL UNIQUE,
+  expires_at timestamp with time zone NOT NULL,
+  accepted_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT invitations_pkey PRIMARY KEY (id),
+  CONSTRAINT invitations_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT invitations_invited_by_fkey FOREIGN KEY (invited_by) REFERENCES public.members(id)
+);
+CREATE TABLE public.members (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  auth_user_id uuid UNIQUE,
+  name text NOT NULL,
+  email text NOT NULL,
+  login_id text,
+  team_id uuid,
+  position_id uuid,
+  role text DEFAULT 'user'::text CHECK (role = ANY (ARRAY['admin'::text, 'manager'::text, 'user'::text])),
+  annual_salary integer DEFAULT 0,
+  is_approved boolean DEFAULT false,
+  is_active boolean DEFAULT true,
+  join_date date DEFAULT CURRENT_DATE,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT members_pkey PRIMARY KEY (id),
+  CONSTRAINT members_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT members_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
+  CONSTRAINT members_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id),
+  CONSTRAINT members_position_id_fkey FOREIGN KEY (position_id) REFERENCES public.positions(id)
+);
+CREATE TABLE public.opex (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  year_month text NOT NULL,
+  amount integer NOT NULL CHECK (amount >= 0),
+  memo text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  items jsonb DEFAULT '[]'::jsonb,
+  CONSTRAINT opex_pkey PRIMARY KEY (id),
+  CONSTRAINT opex_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);
+CREATE TABLE public.organizations (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  name text NOT NULL,
+  slug text NOT NULL UNIQUE,
+  logo_url text,
+  plan text DEFAULT 'free'::text CHECK (plan = ANY (ARRAY['free'::text, 'basic'::text, 'premium'::text, 'enterprise'::text])),
+  max_members integer DEFAULT 5,
+  settings jsonb DEFAULT '{}'::jsonb,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT organizations_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.positions (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  name text NOT NULL,
+  level integer DEFAULT 0,
+  is_active boolean DEFAULT true,
+  sort_order integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT positions_pkey PRIMARY KEY (id),
+  CONSTRAINT positions_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);
+CREATE TABLE public.project_categories (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  name text NOT NULL,
+  is_active boolean DEFAULT true,
+  sort_order integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT project_categories_pkey PRIMARY KEY (id),
+  CONSTRAINT project_categories_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);
+CREATE TABLE public.project_member_allocations (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  project_id uuid NOT NULL,
+  member_id uuid NOT NULL,
+  balance_percent numeric DEFAULT 0,
+  allocated_amount integer DEFAULT 0,
+  planned_days integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT project_member_allocations_pkey PRIMARY KEY (id),
+  CONSTRAINT project_member_allocations_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT project_member_allocations_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),
+  CONSTRAINT project_member_allocations_member_id_fkey FOREIGN KEY (member_id) REFERENCES public.members(id)
+);
+CREATE TABLE public.projects (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  name text NOT NULL,
+  category_id uuid,
+  team_id uuid,
+  status text DEFAULT 'planning'::text CHECK (status = ANY (ARRAY['planning'::text, 'inprogress'::text, 'completed'::text, 'paused'::text])),
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  contract_amount integer DEFAULT 0,
+  direct_costs integer DEFAULT 0,
+  margin_amount integer DEFAULT 0,
+  confirmed boolean DEFAULT false,
+  payment_stage text CHECK (payment_stage = ANY (ARRAY['선금'::text, '중도금'::text, '잔금'::text, '완료'::text])),
+  starred boolean DEFAULT false,
+  contact_name text,
+  contact_phone text,
+  memo text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT projects_pkey PRIMARY KEY (id),
+  CONSTRAINT projects_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT projects_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.project_categories(id),
+  CONSTRAINT projects_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id)
+);
+CREATE TABLE public.receipts (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  project_id uuid NOT NULL,
+  date date NOT NULL,
+  amount integer NOT NULL CHECK (amount > 0),
+  memo text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT receipts_pkey PRIMARY KEY (id),
+  CONSTRAINT receipts_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT receipts_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id)
+);
+CREATE TABLE public.schedules (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  project_id uuid NOT NULL,
+  member_id uuid NOT NULL,
+  date date NOT NULL,
+  minutes integer DEFAULT 0 CHECK (minutes >= 0),
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT schedules_pkey PRIMARY KEY (id),
+  CONSTRAINT schedules_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT schedules_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),
+  CONSTRAINT schedules_member_id_fkey FOREIGN KEY (member_id) REFERENCES public.members(id)
+);
+CREATE TABLE public.teams (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  name text NOT NULL,
+  is_active boolean DEFAULT true,
+  sort_order integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT teams_pkey PRIMARY KEY (id),
+  CONSTRAINT teams_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);
+CREATE TABLE public.work_time_settings (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL UNIQUE,
+  work_minutes_per_day integer DEFAULT 480,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT work_time_settings_pkey PRIMARY KEY (id),
+  CONSTRAINT work_time_settings_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);

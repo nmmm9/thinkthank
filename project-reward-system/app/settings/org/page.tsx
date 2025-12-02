@@ -1,10 +1,42 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
 import { ToggleSwitch, SaveButton, DeleteButton, AddButton } from '@/components/ActionButtons';
-import { teams, positions } from '@/mocks/data';
+import { getTeams, getPositions } from '@/lib/api';
+import type { Team, Position } from '@/lib/supabase/database.types';
 
 export default function OrgPage() {
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [teamsData, positionsData] = await Promise.all([
+          getTeams(),
+          getPositions(),
+        ]);
+        setTeams(teamsData);
+        setPositions(positionsData);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <PageHeader title="팀, 직급" description="회사의 팀과 직급을 설정합니다." />
@@ -40,7 +72,7 @@ export default function OrgPage() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <ToggleSwitch
-                      checked={team.isActive}
+                      checked={team.is_active}
                       onChange={(checked) => console.log('Active:', checked)}
                     />
                   </td>
@@ -86,7 +118,7 @@ export default function OrgPage() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     <ToggleSwitch
-                      checked={position.isActive}
+                      checked={position.is_active}
                       onChange={(checked) => console.log('Active:', checked)}
                     />
                   </td>

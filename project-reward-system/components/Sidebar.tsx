@@ -12,24 +12,34 @@ import {
   Users,
   LogOut,
   ChevronLeft,
+  ChevronDown,
+  Settings,
+  Building2,
+  Wallet,
+  Clock,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth-store';
 import { useSidebarStore } from '@/lib/sidebar-store';
-import { teams, positions } from '@/mocks/data';
 
 const Sidebar = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { member, logout } = useAuthStore();
   const { isCollapsed, toggleSidebar } = useSidebarStore();
   const [isClient, setIsClient] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-  }, []);
+    // 설정 페이지에 있으면 서브메뉴 열기
+    if (pathname.startsWith('/settings')) {
+      setIsSettingsOpen(true);
+    }
+  }, [pathname]);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/login');
   };
 
@@ -41,6 +51,18 @@ const Sidebar = () => {
     { href: '/performance', label: '성과', icon: TrendingUp },
   ];
 
+  // 설정 서브메뉴 (관리자만 전체 표시)
+  const settingsMenuItems = [
+    { href: '/settings/members', label: '팀원 관리', icon: Users },
+    { href: '/settings/org', label: '팀/직급', icon: Building2 },
+    { href: '/settings/opex', label: '운영비', icon: Wallet },
+    { href: '/settings/worktime', label: '휴일/근로시간', icon: Clock },
+    { href: '/settings/misc', label: '기타설정', icon: MoreHorizontal },
+  ];
+
+  // 관리자 여부 확인
+  const isAdmin = member?.role === 'admin';
+
   const isActive = (href: string) => {
     if (href === '/') {
       return pathname === '/' || pathname === '/thinkthank' || pathname === '/thinkthank/';
@@ -48,8 +70,9 @@ const Sidebar = () => {
     return pathname.includes(href);
   };
 
-  const userTeam = user ? teams.find((t) => t.id === user.teamId) : null;
-  const userPosition = user ? positions.find((p) => p.id === user.positionId) : null;
+  // member에서 팀/직급 정보 가져오기
+  const userTeam = member?.team;
+  const userPosition = member?.position;
 
   return (
     <aside
@@ -74,35 +97,37 @@ const Sidebar = () => {
       </div>
 
       {/* 유저 프로필 */}
-      {isClient && user && !isCollapsed && (
+      {isClient && member && !isCollapsed && (
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
               <span className="text-white text-lg font-medium">
-                {user.name.charAt(0)}
+                {member.name?.charAt(0) || '?'}
               </span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-gray-900">
-                안녕하세요 {user.name}님
+                안녕하세요 {member.name}님
               </p>
             </div>
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium text-gray-900">ABC Company</p>
+            <p className="text-sm font-medium text-gray-900">
+              {member.organization?.name || 'CO.UP'}
+            </p>
             <p className="text-xs text-gray-500">
-              {userTeam?.name || '브랜드 디자인팀'} | {userPosition?.name || '사원'}
+              {userTeam?.name || '팀 미지정'} | {userPosition?.name || '직급 미지정'}
             </p>
           </div>
         </div>
       )}
 
       {/* 유저 아바타만 (축소 모드) */}
-      {isClient && user && isCollapsed && (
+      {isClient && member && isCollapsed && (
         <div className="p-3 border-b border-gray-200 flex justify-center">
           <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
             <span className="text-white text-lg font-medium">
-              {user.name.charAt(0)}
+              {member.name?.charAt(0) || '?'}
             </span>
           </div>
         </div>
@@ -134,28 +159,65 @@ const Sidebar = () => {
             );
           })}
 
-          {/* 팀원 (설정 포함) */}
-          <li>
-            <Link
-              href="/settings/members"
-              className={`flex items-center ${
-                isCollapsed ? 'justify-center' : 'gap-3'
-              } px-4 py-3 rounded-lg transition-colors ${
-                pathname.startsWith('/settings')
-                  ? 'bg-blue-50 text-blue-600 font-medium'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title={isCollapsed ? '팀원' : undefined}
-            >
-              <Users className="w-5 h-5 flex-shrink-0" />
-              {!isCollapsed && <span className="text-sm">팀원</span>}
-            </Link>
-          </li>
+          {/* 설정 메뉴 (관리자용 - 서브메뉴 포함) */}
+          {isAdmin && (
+            <li>
+              <button
+                onClick={() => !isCollapsed && setIsSettingsOpen(!isSettingsOpen)}
+                className={`flex items-center w-full ${
+                  isCollapsed ? 'justify-center' : 'justify-between'
+                } px-4 py-3 rounded-lg transition-colors ${
+                  pathname.startsWith('/settings')
+                    ? 'bg-blue-50 text-blue-600 font-medium'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title={isCollapsed ? '설정' : undefined}
+              >
+                <div className={`flex items-center ${isCollapsed ? '' : 'gap-3'}`}>
+                  <Settings className="w-5 h-5 flex-shrink-0" />
+                  {!isCollapsed && <span className="text-sm">설정</span>}
+                </div>
+                {!isCollapsed && (
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${
+                      isSettingsOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                )}
+              </button>
+
+              {/* 설정 서브메뉴 */}
+              {!isCollapsed && isSettingsOpen && (
+                <ul className="mt-1 ml-4 space-y-1">
+                  {settingsMenuItems.map((item) => {
+                    const Icon = item.icon;
+                    const active = pathname === item.href;
+                    return (
+                      <li key={item.href}>
+                        <Link
+                          href={item.href}
+                          className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                            active
+                              ? 'bg-blue-50 text-blue-600 font-medium'
+                              : 'text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          <Icon className="w-4 h-4 flex-shrink-0" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          )}
+
         </ul>
       </nav>
 
       {/* 로그아웃 */}
-      {isClient && user && (
+      {isClient && member && (
         <div className="p-4 border-t border-gray-200">
           <button
             onClick={handleLogout}

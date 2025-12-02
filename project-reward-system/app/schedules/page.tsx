@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { projects, teams, schedules } from '@/mocks/data';
+import { useState, useMemo, useEffect } from 'react';
+import { getProjects, getSchedules } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
+import type { Project, Schedule } from '@/lib/supabase/database.types';
 import {
   format,
   startOfMonth,
@@ -20,12 +21,34 @@ import { ko } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, Eye, EyeOff } from 'lucide-react';
 
 export default function SchedulesPage() {
-  const { user } = useAuthStore();
+  const { member } = useAuthStore();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
-  const [visibleProjects, setVisibleProjects] = useState<Record<string, boolean>>(
-    projects.reduce((acc, p) => ({ ...acc, [p.id]: true }), {})
-  );
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [visibleProjects, setVisibleProjects] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [projectsData, schedulesData] = await Promise.all([
+          getProjects(),
+          getSchedules(),
+        ]);
+        setProjects(projectsData);
+        setSchedules(schedulesData);
+        setVisibleProjects(
+          projectsData.reduce((acc, p) => ({ ...acc, [p.id]: true }), {})
+        );
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, []);
 
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
@@ -52,17 +75,17 @@ export default function SchedulesPage() {
 
   const activeProjects = useMemo(() => {
     return projects.filter((p) => {
-      const end = new Date(p.endDate);
+      const end = new Date(p.end_date);
       return end >= new Date();
     });
-  }, []);
+  }, [projects]);
 
   const completedProjects = useMemo(() => {
     return projects.filter((p) => {
-      const end = new Date(p.endDate);
+      const end = new Date(p.end_date);
       return end < new Date();
     });
-  }, []);
+  }, [projects]);
 
   const toggleProjectVisibility = (projectId: string) => {
     setVisibleProjects((prev) => ({
@@ -72,12 +95,12 @@ export default function SchedulesPage() {
   };
 
   // 특정 날짜에 특정 사용자가 특정 프로젝트에 투입한 시간의 퍼센트 계산
-  const getDailyProjectPercentage = (projectId: string, date: Date, userId: string) => {
+  const getDailyProjectPercentage = (projectId: string, date: Date, memberId: string) => {
     const dateStr = format(date, 'yyyy-MM-dd');
 
     // 해당 날짜의 해당 사용자의 모든 스케줄
     const daySchedules = schedules.filter(
-      (s) => s.memberId === userId && s.date === dateStr
+      (s) => s.member_id === memberId && s.date === dateStr
     );
 
     // 해당 날짜의 총 투입 시간
@@ -87,7 +110,7 @@ export default function SchedulesPage() {
 
     // 해당 프로젝트에 투입한 시간
     const projectMinutes = daySchedules
-      .filter((s) => s.projectId === projectId)
+      .filter((s) => s.project_id === projectId)
       .reduce((sum, s) => sum + s.minutes, 0);
 
     // 퍼센트 계산
@@ -95,19 +118,19 @@ export default function SchedulesPage() {
   };
 
   // 특정 날짜에 사용자가 작업한 프로젝트 목록
-  const getDayProjects = (date: Date, userId: string) => {
+  const getDayProjects = (date: Date, memberId: string) => {
     const dateStr = format(date, 'yyyy-MM-dd');
     const daySchedules = schedules.filter(
-      (s) => s.memberId === userId && s.date === dateStr && s.minutes > 0
+      (s) => s.member_id === memberId && s.date === dateStr && s.minutes > 0
     );
 
-    return daySchedules.map((s) => s.projectId);
+    return daySchedules.map((s) => s.project_id);
   };
 
   // 프로젝트를 여러 행으로 나누는 함수 (각 주마다 별도의 바)
-  const getProjectBars = (project: typeof projects[0], displayDays: Date[]) => {
-    const startDate = new Date(project.startDate);
-    const endDate = new Date(project.endDate);
+  const getProjectBars = (project: Project, displayDays: Date[]) => {
+    const startDate = new Date(project.start_date);
+    const endDate = new Date(project.end_date);
 
     const firstDay = displayDays[0];
     const lastDay = displayDays[displayDays.length - 1];
@@ -147,19 +170,27 @@ export default function SchedulesPage() {
   };
 
   // 각 날짜별로 프로젝트를 레이어(층)로 배치
-  const getProjectLayer = (project: typeof projects[0], barStartDate: Date, visibleProjectsList: typeof projects) => {
+  const getProjectLayer = (project: Project, barStartDate: Date, visibleProjectsList: Project[]) => {
     const dateStr = format(barStartDate, 'yyyy-MM-dd');
 
     // 해당 날짜에 시작하는 다른 프로젝트들 찾기
     const projectsOnSameDay = visibleProjectsList.filter((p) => {
-      const pStart = new Date(p.startDate);
-      const pEnd = new Date(p.endDate);
+      const pStart = new Date(p.start_date);
+      const pEnd = new Date(p.end_date);
       return barStartDate >= pStart && barStartDate <= pEnd;
     });
 
     // 현재 프로젝트의 인덱스 반환 (레이어로 사용)
     return projectsOnSameDay.findIndex((p) => p.id === project.id);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
@@ -201,8 +232,8 @@ export default function SchedulesPage() {
 
             {calendarDays.map((day) => {
               const hasProject = projects.some((p) => {
-                const start = new Date(p.startDate);
-                const end = new Date(p.endDate);
+                const start = new Date(p.start_date);
+                const end = new Date(p.end_date);
                 return day >= start && day <= end;
               });
 
@@ -336,7 +367,7 @@ export default function SchedulesPage() {
               <div className="grid grid-cols-7 gap-4">
                 {weekDays.map((day) => {
                   const dateStr = format(day, 'yyyy-MM-dd');
-                  const dayProjects = user ? getDayProjects(day, user.id) : [];
+                  const dayProjects = member ? getDayProjects(day, member.id) : [];
 
                   return (
                     <div key={format(day, 'yyyy-MM-dd')} className="flex flex-col">
@@ -354,7 +385,7 @@ export default function SchedulesPage() {
                       <div className="flex flex-col items-center flex-1">
                         <div className="relative w-full h-[500px] bg-gray-50 rounded-lg border border-gray-200 flex flex-col">
                           {/* 8시간(480분) = 100% */}
-                          {user &&
+                          {member &&
                             dayProjects.map((projectId, idx) => {
                               if (!visibleProjects[projectId]) return null;
 
@@ -362,7 +393,7 @@ export default function SchedulesPage() {
                               if (!project) return null;
 
                               const daySchedule = schedules.find(
-                                (s) => s.memberId === user.id && s.date === dateStr && s.projectId === projectId
+                                (s) => s.member_id === member.id && s.date === dateStr && s.project_id === projectId
                               );
                               const minutes = daySchedule?.minutes || 0;
                               const percentage = (minutes / 480) * 100; // 480분 = 8시간
@@ -495,9 +526,9 @@ export default function SchedulesPage() {
                                 zIndex: 10 + layer,
                               }}
                               title={`${project.name}\n${format(
-                                new Date(project.startDate),
+                                new Date(project.start_date),
                                 'yyyy/MM/dd'
-                              )} ~ ${format(new Date(project.endDate), 'yyyy/MM/dd')}`}
+                              )} ~ ${format(new Date(project.end_date), 'yyyy/MM/dd')}`}
                             >
                               {/* 첫 번째 바에만 프로젝트명 표시 */}
                               {barIdx === 0 && (

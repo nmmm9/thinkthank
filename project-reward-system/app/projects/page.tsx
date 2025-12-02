@@ -1,26 +1,81 @@
 'use client';
 
-import { useState } from 'react';
-import { projects, projectCategories } from '@/mocks/data';
-import { differenceInDays, format } from 'date-fns';
-import { Star, Search } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { getProjects, getProjectCategories, toggleProjectStar, updateProject, createProject, getMembers, getOpexList, setProjectAllocations } from '@/lib/api';
+import type { Project, ProjectCategory, MemberWithRelations, Opex } from '@/lib/supabase/database.types';
+import { differenceInDays, format, addDays } from 'date-fns';
+import { Star, Search, Edit2 } from 'lucide-react';
+import { getWorkingDaysInMonth, getYearMonthFromDate, addWorkingDays, getWorkingDaysBetween } from '@/lib/utils/workdays';
+
+// 확장된 프로젝트 타입
+interface ProjectWithRelations extends Project {
+  category?: ProjectCategory | null;
+}
 
 export default function ProjectsPage() {
+  const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
+  const [projectCategories, setProjectCategories] = useState<ProjectCategory[]>([]);
+  const [members, setMembers] = useState<MemberWithRelations[]>([]);
+  const [opexes, setOpexes] = useState<Opex[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [starredProjects, setStarredProjects] = useState<Record<string, boolean>>(
-    projects.reduce((acc, p) => ({ ...acc, [p.id]: p.starred || false }), {})
-  );
+  const [starredProjects, setStarredProjects] = useState<Record<string, boolean>>({});
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<ProjectWithRelations | null>(null);
 
   const itemsPerPage = 10;
 
+  // 데이터 로드
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [projectsData, categoriesData, membersData, opexData] = await Promise.all([
+          getProjects(),
+          getProjectCategories(),
+          getMembers(),
+          getOpexList(),
+        ]);
+        setProjects(projectsData as ProjectWithRelations[]);
+        setProjectCategories(categoriesData);
+        setMembers(membersData);
+        setOpexes(opexData);
+
+        // 즐겨찾기 상태 초기화
+        const starredState = (projectsData as ProjectWithRelations[]).reduce(
+          (acc, p) => ({ ...acc, [p.id]: p.starred || false }),
+          {}
+        );
+        setStarredProjects(starredState);
+      } catch (error) {
+        console.error('데이터 로드 실패:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
   // 즐겨찾기 토글
-  const toggleStar = (projectId: string) => {
+  const handleToggleStar = async (projectId: string) => {
+    const newStarred = !starredProjects[projectId];
     setStarredProjects((prev) => ({
       ...prev,
-      [projectId]: !prev[projectId],
+      [projectId]: newStarred,
     }));
+
+    try {
+      await toggleProjectStar(projectId, newStarred);
+    } catch (error) {
+      console.error('즐겨찾기 변경 실패:', error);
+      // 실패 시 롤백
+      setStarredProjects((prev) => ({
+        ...prev,
+        [projectId]: !newStarred,
+      }));
+    }
   };
 
   // 실행률 계산 (시작일부터 오늘까지 / 전체 기간)
@@ -61,6 +116,21 @@ export default function ProjectsPage() {
       paused: 'bg-red-100 text-red-700',
     };
     return colors[status] || 'bg-gray-100 text-gray-700';
+  };
+
+  // 프로젝트 수정 핸들러
+  const handleEditProject = (project: ProjectWithRelations) => {
+    setSelectedProject(project);
+    setShowEditModal(true);
+  };
+
+  // 프로젝트 수정 후 목록 갱신
+  const handleProjectUpdated = (updatedProject: Project) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === updatedProject.id ? { ...p, ...updatedProject } : p))
+    );
+    setShowEditModal(false);
+    setSelectedProject(null);
   };
 
   // 검색 필터링
@@ -106,6 +176,17 @@ export default function ProjectsPage() {
     }
     return pages;
   };
+
+  if (isLoading) {
+    return (
+      <div className="p-6 bg-gray-50 min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <p className="mt-2 text-gray-600">로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -154,12 +235,13 @@ export default function ProjectsPage() {
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-64">계약기간</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">계약금</th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-48">실행률</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-20">관리</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {currentProjects.map((project) => {
-              const category = projectCategories.find((c) => c.id === project.categoryId);
-              const executionRate = calculateExecutionRate(project.startDate, project.endDate);
+              const category = project.category || projectCategories.find((c) => c.id === project.category_id);
+              const executionRate = calculateExecutionRate(project.start_date, project.end_date);
               const isStarred = starredProjects[project.id];
 
               return (
@@ -167,7 +249,7 @@ export default function ProjectsPage() {
                   {/* 즐겨찾기 */}
                   <td className="px-4 py-3 text-center">
                     <button
-                      onClick={() => toggleStar(project.id)}
+                      onClick={() => handleToggleStar(project.id)}
                       className="text-gray-400 hover:text-yellow-500 transition-colors"
                     >
                       <Star
@@ -199,14 +281,14 @@ export default function ProjectsPage() {
 
                   {/* 계약기간 */}
                   <td className="px-4 py-3 text-center text-gray-700">
-                    {format(new Date(project.startDate), 'yyyy/MM/dd')} ~{' '}
-                    {format(new Date(project.endDate), 'yyyy/MM/dd')}
+                    {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
+                    {format(new Date(project.end_date), 'yyyy/MM/dd')}
                   </td>
 
                   {/* 계약금 */}
                   <td className="px-4 py-3 text-right text-gray-700">
-                    {project.contractAmount > 0
-                      ? `${project.contractAmount.toLocaleString()}원`
+                    {project.contract_amount > 0
+                      ? `${project.contract_amount.toLocaleString()}원`
                       : '0원'}
                   </td>
 
@@ -232,90 +314,262 @@ export default function ProjectsPage() {
                       </span>
                     </div>
                   </td>
+
+                  {/* 관리 */}
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => handleEditProject(project)}
+                      className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="수정"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+
+        {currentProjects.length === 0 && (
+          <div className="text-center py-8 text-gray-500">
+            프로젝트가 없습니다.
+          </div>
+        )}
       </div>
 
       {/* 페이지네이션 */}
-      <div className="flex justify-center items-center gap-2 mt-6">
-        <button
-          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-          disabled={currentPage === 1}
-          className="px-3 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          &lt;
-        </button>
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center gap-2 mt-6">
+          <button
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            &lt;
+          </button>
 
-        {getPageNumbers().map((page, index) => {
-          if (page === '...') {
+          {getPageNumbers().map((page, index) => {
+            if (page === '...') {
+              return (
+                <span key={`ellipsis-${index}`} className="px-3 py-1 text-gray-500">
+                  ...
+                </span>
+              );
+            }
+
             return (
-              <span key={`ellipsis-${index}`} className="px-3 py-1 text-gray-500">
-                ...
-              </span>
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page as number)}
+                className={`px-3 py-1 rounded transition-colors ${
+                  currentPage === page
+                    ? 'bg-blue-600 text-white'
+                    : 'hover:bg-gray-100 text-gray-700'
+                }`}
+              >
+                {page}
+              </button>
             );
-          }
+          })}
 
-          return (
-            <button
-              key={page}
-              onClick={() => setCurrentPage(page as number)}
-              className={`px-3 py-1 rounded transition-colors ${
-                currentPage === page
-                  ? 'bg-blue-600 text-white'
-                  : 'hover:bg-gray-100 text-gray-700'
-              }`}
-            >
-              {page}
-            </button>
-          );
-        })}
-
-        <button
-          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-          disabled={currentPage === totalPages}
-          className="px-3 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          &gt;
-        </button>
-      </div>
+          <button
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            &gt;
+          </button>
+        </div>
+      )}
 
       {/* 프로젝트 추가 모달 */}
       {showAddModal && (
-        <ProjectAddModal
+        <ProjectFormModal
           isOpen={showAddModal}
           onClose={() => setShowAddModal(false)}
+          projectCategories={projectCategories}
+          members={members}
+          opexes={opexes}
+          onSave={(project) => {
+            setProjects((prev) => [project, ...prev]);
+            setShowAddModal(false);
+          }}
+        />
+      )}
+
+      {/* 프로젝트 수정 모달 */}
+      {showEditModal && selectedProject && (
+        <ProjectFormModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedProject(null);
+          }}
+          projectCategories={projectCategories}
+          members={members}
+          opexes={opexes}
+          project={selectedProject}
+          onSave={handleProjectUpdated}
         />
       )}
     </div>
   );
 }
 
-// 프로젝트 추가 모달 컴포넌트
-function ProjectAddModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const [projectName, setProjectName] = useState('');
-  const [projectType, setProjectType] = useState('');
-  const [projectStatus, setProjectStatus] = useState('');
-  const [projectPM, setProjectPM] = useState('');
-  const [contractStartDate, setContractStartDate] = useState('');
-  const [contractEndDate, setContractEndDate] = useState('');
-  const [projectStartDate, setProjectStartDate] = useState('');
-  const [projectEndDate, setProjectEndDate] = useState('');
+// 프로젝트 추가/수정 모달 컴포넌트
+function ProjectFormModal({
+  isOpen,
+  onClose,
+  projectCategories,
+  members,
+  opexes,
+  project,
+  onSave
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  projectCategories: ProjectCategory[];
+  members: MemberWithRelations[];
+  opexes: Opex[];
+  project?: Project | null;
+  onSave: (project: Project) => void;
+}) {
+  const isEditMode = !!project;
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [projectName, setProjectName] = useState(project?.name || '');
+  const [projectType, setProjectType] = useState(project?.category_id || '');
+  const [projectStatus, setProjectStatus] = useState(project?.status || '');
+  const [projectPM, setProjectPM] = useState(project?.contact_name || '');
+  const [contractStartDate, setContractStartDate] = useState(project?.start_date || '');
+  const [contractEndDate, setContractEndDate] = useState(project?.end_date || '');
+  const [projectStartDate, setProjectStartDate] = useState(project?.start_date || '');
+  const [projectEndDate, setProjectEndDate] = useState(project?.end_date || '');
   const [downPaymentPercent, setDownPaymentPercent] = useState('50');
   const [midPaymentPercent, setMidPaymentPercent] = useState('');
   const [finalPaymentPercent, setFinalPaymentPercent] = useState('50');
+  const [contractAmount, setContractAmount] = useState(project?.contract_amount?.toString() || '');
 
-  // 팀원 배정
-  const [teamMembers, setTeamMembers] = useState<Array<{
-    id: string;
-    name: string;
+  // 활성 팀원 목록
+  const activeMembers = members.filter((m) => m.is_active && m.is_approved);
+
+  // 전체 연봉 합계
+  const totalAnnualSalary = activeMembers.reduce((sum, m) => sum + m.annual_salary, 0);
+  const totalMonthlySalary = totalAnnualSalary / 12;
+
+  // 팀원 배정 타입
+  type TeamMemberAllocation = {
+    memberId: string;
     startDate: string;
-    mm: string;
+    days: string;
     endDate: string;
-    cost: string;
-  }>>([]);
+    dailySalaryCost: number;
+    dailyOpexCost: number;
+    dailyTotalCost: number;
+    cost: number;
+  };
+
+  // 기존 프로젝트의 팀원 배정 데이터 초기화
+  const getInitialTeamMembers = (): TeamMemberAllocation[] => {
+    // allocations는 API에서 조인된 데이터
+    const allocations = (project as any)?.allocations;
+    if (!allocations || allocations.length === 0) return [];
+
+    return allocations.map((alloc: any) => {
+      const memberId = alloc.member_id || '';
+      const startDate = alloc.start_date || project?.start_date || '';
+      const days = alloc.planned_days?.toString() || '';
+      const endDate = alloc.end_date || project?.end_date || '';
+
+      // 비용 계산
+      let dailySalaryCost = 0;
+      let dailyOpexCost = 0;
+      let dailyTotalCost = 0;
+      let cost = alloc.allocated_amount || 0;
+
+      if (memberId && startDate) {
+        const member = activeMembers.find((m) => m.id === memberId);
+        if (member) {
+          const date = new Date(startDate);
+          const year = date.getFullYear();
+          const month = date.getMonth() + 1;
+          const workingDaysInMonth = getWorkingDaysInMonth(year, month);
+
+          const salaryRatio = totalAnnualSalary > 0 ? member.annual_salary / totalAnnualSalary : 0;
+          const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+          const monthOpex = opexes.find((o) => o.year_month === yearMonth);
+          const opexAmount = monthOpex?.amount || opexes[0]?.amount || 0;
+
+          // 판관비 = 운영비 - 전체 월급
+          const adminExpense = Math.max(0, opexAmount - totalMonthlySalary);
+
+          // 1일 1인 판관비 = 판관비 × 연봉비중 / 해당월 근무일수
+          dailyOpexCost = workingDaysInMonth > 0
+            ? Math.round((adminExpense * salaryRatio) / workingDaysInMonth)
+            : 0;
+          dailySalaryCost = workingDaysInMonth > 0
+            ? Math.round((member.annual_salary / 12) / workingDaysInMonth)
+            : 0;
+          dailyTotalCost = dailySalaryCost + dailyOpexCost;
+
+          // cost가 없으면 계산
+          if (!cost && days) {
+            cost = dailyTotalCost * (parseInt(days) || 0);
+          }
+        }
+      }
+
+      return {
+        memberId,
+        startDate,
+        days,
+        endDate,
+        dailySalaryCost,
+        dailyOpexCost,
+        dailyTotalCost,
+        cost,
+      };
+    });
+  };
+
+  const [teamMembers, setTeamMembers] = useState<TeamMemberAllocation[]>(getInitialTeamMembers());
+
+  // 운영비 부족 월 체크 함수
+  const checkOpexShortage = (startDate: string): { isShort: boolean; yearMonth: string; shortage: number } | null => {
+    if (!startDate) return null;
+
+    const date = new Date(startDate);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+
+    const monthOpex = opexes.find((o) => o.year_month === yearMonth);
+    const opexAmount = monthOpex?.amount || 0;
+
+    if (opexAmount < totalMonthlySalary) {
+      return {
+        isShort: true,
+        yearMonth,
+        shortage: totalMonthlySalary - opexAmount,
+      };
+    }
+    return null;
+  };
+
+  // 팀원 배정 중 운영비 부족 월 목록
+  const opexShortageMonths = teamMembers
+    .filter((m) => m.startDate)
+    .map((m) => checkOpexShortage(m.startDate))
+    .filter((result): result is { isShort: boolean; yearMonth: string; shortage: number } => result !== null && result.isShort);
+
+  // 중복 제거
+  const uniqueShortageMonths = opexShortageMonths.reduce((acc, curr) => {
+    if (!acc.find((item) => item.yearMonth === curr.yearMonth)) {
+      acc.push(curr);
+    }
+    return acc;
+  }, [] as typeof opexShortageMonths);
 
   // 직접비
   const [directCosts, setDirectCosts] = useState<Array<{
@@ -326,13 +580,150 @@ function ProjectAddModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
   // 기술료
   const [techFeeRate, setTechFeeRate] = useState('15');
   const [roundingMethod, setRoundingMethod] = useState('반올림');
-  const [memo, setMemo] = useState('');
+  const [memo, setMemo] = useState(project?.memo || '');
+
+  // 1일 투입비용 상세 계산 함수
+  const calculateDailyCostDetails = (memberId: string, startDate: string) => {
+    const member = activeMembers.find((m) => m.id === memberId);
+    if (!member || !startDate) return { dailySalaryCost: 0, dailyOpexCost: 0, dailyTotalCost: 0 };
+
+    const date = new Date(startDate);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const workingDaysInMonth = getWorkingDaysInMonth(year, month);
+
+    // 개인 연봉 비중
+    const salaryRatio = totalAnnualSalary > 0 ? member.annual_salary / totalAnnualSalary : 0;
+
+    // 해당 월의 운영비
+    const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const monthOpex = opexes.find((o) => o.year_month === yearMonth);
+    const opexAmount = monthOpex?.amount || opexes[0]?.amount || 0;
+
+    // 판관비 = 운영비 - 전체 월급
+    const adminExpense = Math.max(0, opexAmount - totalMonthlySalary);
+
+    // 1일 1인 판관비 = 판관비 × 연봉비중 / 해당월 근무일수
+    const dailyOpexCost = workingDaysInMonth > 0
+      ? Math.round((adminExpense * salaryRatio) / workingDaysInMonth)
+      : 0;
+
+    // 1일 매출원가 (인건비) = 연봉 / 12 / 해당월 근무일수
+    const dailySalaryCost = workingDaysInMonth > 0
+      ? Math.round((member.annual_salary / 12) / workingDaysInMonth)
+      : 0;
+
+    return {
+      dailySalaryCost,
+      dailyOpexCost,
+      dailyTotalCost: dailySalaryCost + dailyOpexCost,
+    };
+  };
+
+  // 투입비용 계산 (1일 비용 × 투입일수)
+  const calculateTotalCostDetails = (memberId: string, startDate: string, days: number) => {
+    const details = calculateDailyCostDetails(memberId, startDate);
+    return {
+      ...details,
+      cost: details.dailyTotalCost * days,
+    };
+  };
+
+  // 비용 상세 업데이트 헬퍼
+  const updateCostDetails = (memberData: typeof teamMembers[0]) => {
+    if (memberData.memberId && memberData.startDate && memberData.days) {
+      const details = calculateTotalCostDetails(
+        memberData.memberId,
+        memberData.startDate,
+        parseInt(memberData.days) || 0
+      );
+      memberData.dailySalaryCost = details.dailySalaryCost;
+      memberData.dailyOpexCost = details.dailyOpexCost;
+      memberData.dailyTotalCost = details.dailyTotalCost;
+      memberData.cost = details.cost;
+    } else {
+      memberData.dailySalaryCost = 0;
+      memberData.dailyOpexCost = 0;
+      memberData.dailyTotalCost = 0;
+      memberData.cost = 0;
+    }
+  };
+
+  // 팀원 선택 시 처리
+  const handleMemberSelect = (index: number, memberId: string) => {
+    const updated = [...teamMembers];
+    updated[index].memberId = memberId;
+    updateCostDetails(updated[index]);
+    setTeamMembers(updated);
+  };
+
+  // 시작일 변경 시 처리
+  const handleStartDateChange = (index: number, startDate: string) => {
+    const updated = [...teamMembers];
+    updated[index].startDate = startDate;
+
+    // 투입일수(근무일)가 있으면 종료일 계산
+    if (updated[index].days) {
+      const days = parseInt(updated[index].days) || 0;
+      if (days > 0) {
+        const endDate = addWorkingDays(new Date(startDate), days);
+        updated[index].endDate = format(endDate, 'yyyy-MM-dd');
+      }
+    }
+
+    updateCostDetails(updated[index]);
+    setTeamMembers(updated);
+  };
+
+  // 투입일수 변경 시 처리 (종료일 자동 계산 - 근무일 기준)
+  const handleDaysChange = (index: number, days: string) => {
+    const updated = [...teamMembers];
+    updated[index].days = days;
+
+    // 시작일이 있으면 종료일 계산 (근무일 기준)
+    if (updated[index].startDate && days) {
+      const daysNum = parseInt(days) || 0;
+      if (daysNum > 0) {
+        const endDate = addWorkingDays(new Date(updated[index].startDate), daysNum);
+        updated[index].endDate = format(endDate, 'yyyy-MM-dd');
+      }
+    }
+
+    updateCostDetails(updated[index]);
+    setTeamMembers(updated);
+  };
+
+  // 종료일 변경 시 처리 (투입일수 자동 계산 - 근무일 기준)
+  const handleEndDateChange = (index: number, endDate: string) => {
+    const updated = [...teamMembers];
+    updated[index].endDate = endDate;
+
+    // 시작일이 있으면 투입일수 계산 (근무일 기준)
+    if (updated[index].startDate && endDate) {
+      const start = new Date(updated[index].startDate);
+      const end = new Date(endDate);
+      const workingDays = getWorkingDaysBetween(start, end);
+      updated[index].days = workingDays > 0 ? workingDays.toString() : '';
+    }
+
+    updateCostDetails(updated[index]);
+    setTeamMembers(updated);
+  };
 
   // 팀원 추가
   const addTeamMember = () => {
     setTeamMembers([
       ...teamMembers,
-      { id: '', name: '', startDate: '', mm: '', endDate: '', cost: '' },
+      {
+        memberId: '',
+        startDate: '',
+        days: '',
+        endDate: '',
+        dailySalaryCost: 0,
+        dailyOpexCost: 0,
+        dailyTotalCost: 0,
+        cost: 0
+      },
     ]);
   };
 
@@ -353,7 +744,7 @@ function ProjectAddModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
 
   // 총 투입비용 계산 (팀원 투입비용 합계)
   const totalMemberCost = teamMembers.reduce((sum, member) => {
-    return sum + (parseInt(member.cost) || 0);
+    return sum + (member.cost || 0);
   }, 0);
 
   // 직접비 총합
@@ -364,10 +755,11 @@ function ProjectAddModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
   // 기술료 계산
   const techFee = Math.round(totalMemberCost * (parseInt(techFeeRate) / 100));
 
-  // 총 투입공수 계산 (M/M 합계)
-  const totalMM = teamMembers.reduce((sum, member) => {
-    return sum + (parseFloat(member.mm) || 0);
+  // 총 투입공수 계산 (일수 합계를 M/M으로 변환, 20일 = 1M/M)
+  const totalDays = teamMembers.reduce((sum, member) => {
+    return sum + (parseInt(member.days) || 0);
   }, 0);
+  const totalMM = totalDays / 20;
 
   // 총 계약금 (VAT 별도)
   const totalContractAmount = totalMemberCost + totalDirectCost + techFee;
@@ -568,76 +960,139 @@ function ProjectAddModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
               </button>
             </div>
 
+            {/* 운영비 부족 경고 */}
+            {uniqueShortageMonths.length > 0 && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <div className="text-red-500 text-xl">⚠️</div>
+                  <div>
+                    <div className="font-semibold text-red-700 mb-2">
+                      운영비가 부족합니다!
+                    </div>
+                    <div className="text-sm text-red-600 space-y-1">
+                      {uniqueShortageMonths.map((item) => (
+                        <div key={item.yearMonth}>
+                          <span className="font-medium">{item.yearMonth}</span>:
+                          운영비가 인건비보다 <span className="font-bold">{Math.round(item.shortage).toLocaleString()}원</span> 부족합니다.
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 text-sm text-red-700">
+                      👉 <a href="/settings/opex" className="underline font-medium hover:text-red-800">운영비 설정</a>에서 해당 월의 운영비를 추가해주세요.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {teamMembers.length > 0 ? (
               <div className="space-y-3">
-                {teamMembers.map((member, index) => (
-                  <div
-                    key={index}
-                    className="grid grid-cols-6 gap-3 items-center bg-gray-50 p-3 rounded-lg"
-                  >
-                    <input
-                      type="text"
-                      value={member.name}
-                      onChange={(e) => {
-                        const updated = [...teamMembers];
-                        updated[index].name = e.target.value;
-                        setTeamMembers(updated);
-                      }}
-                      placeholder="이름"
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <input
-                      type="date"
-                      value={member.startDate}
-                      onChange={(e) => {
-                        const updated = [...teamMembers];
-                        updated[index].startDate = e.target.value;
-                        setTeamMembers(updated);
-                      }}
-                      placeholder="투입일"
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <input
-                      type="text"
-                      value={member.mm}
-                      onChange={(e) => {
-                        const updated = [...teamMembers];
-                        updated[index].mm = e.target.value;
-                        setTeamMembers(updated);
-                      }}
-                      placeholder="M/M"
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <input
-                      type="date"
-                      value={member.endDate}
-                      onChange={(e) => {
-                        const updated = [...teamMembers];
-                        updated[index].endDate = e.target.value;
-                        setTeamMembers(updated);
-                      }}
-                      placeholder="투입 종료"
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <input
-                      type="text"
-                      value={member.cost}
-                      onChange={(e) => {
-                        const updated = [...teamMembers];
-                        updated[index].cost = e.target.value;
-                        setTeamMembers(updated);
-                      }}
-                      placeholder="투입 비용"
-                      className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <button
-                      onClick={() => removeTeamMember(index)}
-                      className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+                {teamMembers.map((member, index) => {
+                  const selectedMember = activeMembers.find((m) => m.id === member.memberId);
+                  return (
+                    <div
+                      key={index}
+                      className="bg-gray-50 p-4 rounded-lg border border-gray-200"
                     >
-                      삭제
-                    </button>
-                  </div>
-                ))}
+                      {/* 상단: 팀원 선택 및 기간 입력 */}
+                      <div className="grid grid-cols-5 gap-3 items-center mb-3">
+                        {/* 팀원 선택 드롭다운 */}
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">팀원</label>
+                          <select
+                            value={member.memberId}
+                            onChange={(e) => handleMemberSelect(index, e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                          >
+                            <option value="">팀원 선택</option>
+                            {activeMembers.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.position?.name || '직급 없음'})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        {/* 투입 시작일 */}
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">투입 시작일</label>
+                          <input
+                            type="date"
+                            value={member.startDate}
+                            onChange={(e) => handleStartDateChange(index, e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          />
+                        </div>
+                        {/* 투입일수 */}
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">투입일수</label>
+                          <input
+                            type="number"
+                            value={member.days}
+                            onChange={(e) => handleDaysChange(index, e.target.value)}
+                            placeholder="일수"
+                            min="1"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          />
+                        </div>
+                        {/* 투입 종료일 */}
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">투입 종료일</label>
+                          <input
+                            type="date"
+                            value={member.endDate}
+                            onChange={(e) => handleEndDateChange(index, e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          />
+                        </div>
+                        {/* 삭제 버튼 */}
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => removeTeamMember(index)}
+                            className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 하단: 비용 상세 정보 */}
+                      {member.memberId && member.startDate && member.days && (
+                        <div className="bg-white rounded-lg p-3 border border-blue-100">
+                          <div className="grid grid-cols-4 gap-4 text-sm">
+                            {/* 1일 인건비 */}
+                            <div className="text-center">
+                              <div className="text-xs text-gray-500 mb-1">1일 인건비</div>
+                              <div className="font-medium text-gray-700">
+                                {member.dailySalaryCost.toLocaleString()}원
+                              </div>
+                            </div>
+                            {/* 1일 판관비 */}
+                            <div className="text-center">
+                              <div className="text-xs text-gray-500 mb-1">1일 판관비</div>
+                              <div className="font-medium text-gray-700">
+                                {member.dailyOpexCost.toLocaleString()}원
+                              </div>
+                            </div>
+                            {/* 1일 총 비용 */}
+                            <div className="text-center">
+                              <div className="text-xs text-gray-500 mb-1">1일 총 비용</div>
+                              <div className="font-medium text-gray-900">
+                                {member.dailyTotalCost.toLocaleString()}원
+                              </div>
+                            </div>
+                            {/* 총 투입비용 */}
+                            <div className="text-center bg-blue-50 rounded-lg py-1">
+                              <div className="text-xs text-blue-600 mb-1">총 투입비용 ({member.days}일)</div>
+                              <div className="font-bold text-blue-700 text-lg">
+                                {member.cost.toLocaleString()}원
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
@@ -799,17 +1254,78 @@ function ProjectAddModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
             onClick={onClose}
             className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
           >
-            삭제
+            취소
           </button>
           <button
-            onClick={() => {
-              // 저장 로직
-              console.log('프로젝트 저장');
-              onClose();
+            onClick={async () => {
+              if (!projectName.trim()) {
+                alert('프로젝트명을 입력해주세요.');
+                return;
+              }
+              if (!contractStartDate || !contractEndDate) {
+                alert('계약 기간을 입력해주세요.');
+                return;
+              }
+
+              // 운영비 부족 체크
+              if (uniqueShortageMonths.length > 0) {
+                const monthList = uniqueShortageMonths.map((m) => m.yearMonth).join(', ');
+                alert(`운영비가 부족한 월이 있습니다: ${monthList}\n\n운영비 설정에서 해당 월의 운영비를 추가해주세요.`);
+                return;
+              }
+
+              setIsSaving(true);
+              try {
+                const projectData = {
+                  name: projectName,
+                  category_id: projectType || null,
+                  status: projectStatus || 'planning',
+                  start_date: contractStartDate,
+                  end_date: contractEndDate,
+                  contract_amount: parseInt(contractAmount) || totalContractAmount,
+                  memo: memo || null,
+                  contact_name: projectPM || null,
+                };
+
+                let result;
+                if (isEditMode && project) {
+                  result = await updateProject(project.id, projectData);
+                } else {
+                  result = await createProject(projectData as any);
+                }
+
+                // 팀원 배정 저장
+                if (result && teamMembers.length > 0) {
+                  const validMembers = teamMembers.filter((m) => m.memberId);
+                  if (validMembers.length > 0) {
+                    await setProjectAllocations(
+                      result.id,
+                      result.org_id,
+                      validMembers.map((m) => ({
+                        memberId: m.memberId,
+                        allocatedAmount: m.cost,
+                        plannedDays: parseInt(m.days) || 0,
+                        startDate: m.startDate,
+                        endDate: m.endDate,
+                      }))
+                    );
+                  }
+                }
+
+                if (result) {
+                  onSave(result);
+                }
+              } catch (error) {
+                console.error('프로젝트 저장 실패:', error);
+                alert('프로젝트 저장에 실패했습니다.');
+              } finally {
+                setIsSaving(false);
+              }
             }}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            disabled={isSaving}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            저장
+            {isSaving ? '저장 중...' : (isEditMode ? '수정' : '저장')}
           </button>
         </div>
       </div>

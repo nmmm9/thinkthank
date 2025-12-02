@@ -1,47 +1,30 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/auth-store';
-import { members } from '@/mocks/data';
 
 export default function LoginPage() {
-  const [loginId, setLoginId] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
 
   const router = useRouter();
-  const login = useAuthStore((state) => state.login);
+  const { login, isAuthenticated, isLoading, error, clearError } = useAuthStore();
+
+  // 이미 로그인된 경우 대시보드로 리다이렉트
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/');
+    }
+  }, [isAuthenticated, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setIsLoading(true);
+    clearError();
 
-    // 더미 인증 로직 (실제로는 API 호출)
-    setTimeout(() => {
-      const user = members.find(
-        (m) => m.loginId === loginId && m.isActive && m.isApproved
-      );
+    const result = await login(email, password);
 
-      if (user) {
-        // 더미에서는 비밀번호 체크 생략 (실제로는 필요)
-        login(user);
-        router.push('/');
-      } else {
-        setError('아이디를 확인해주세요. 또는 승인되지 않은 계정입니다.');
-      }
-
-      setIsLoading(false);
-    }, 500);
-  };
-
-  // 빠른 로그인 버튼 (개발용)
-  const quickLogin = (level: 'admin' | 'manager' | 'user') => {
-    const user = members.find((m) => m.level === level && m.isActive && m.isApproved);
-    if (user) {
-      login(user);
+    if (result.success) {
       router.push('/');
     }
   };
@@ -75,9 +58,9 @@ export default function LoginPage() {
                 아이디
               </label>
               <input
-                type="text"
-                value={loginId}
-                onChange={(e) => setLoginId(e.target.value)}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="이메일 주소를 입력하세요"
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 required
@@ -128,31 +111,27 @@ export default function LoginPage() {
           {/* 신규 입사자 로그인 */}
           <div className="mt-6">
             <button
-              onClick={() => quickLogin('user')}
               className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
             >
               신규 입사자 (사원급) 로그인
             </button>
           </div>
 
-          {/* 개발용 빠른 로그인 */}
+          {/* 개발용 빠른 로그인 - 실제 DB 사용 시 제거 가능 */}
           <div className="mt-8 pt-6 border-t border-gray-200">
             <p className="text-xs text-gray-500 mb-3 text-center">빠른 로그인 (개발용)</p>
             <div className="grid grid-cols-3 gap-2">
               <button
-                onClick={() => quickLogin('admin')}
                 className="px-3 py-2 text-xs bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors"
               >
                 CEO
               </button>
               <button
-                onClick={() => quickLogin('manager')}
                 className="px-3 py-2 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
               >
                 팀장
               </button>
               <button
-                onClick={() => quickLogin('user')}
                 className="px-3 py-2 text-xs bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
               >
                 일반사원

@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import Modal from '@/components/Modal';
 import { SaveButton, DeleteButton } from '@/components/ActionButtons';
-import { projects, receipts, projectCategories } from '@/mocks/data';
-import { format } from 'date-fns';
+import { getProjects, getReceipts, getProjectCategories, getMembers, getOpexList, getSchedules } from '@/lib/api';
+import type { Project, Receipt, ProjectCategory, Schedule, Opex, MemberWithRelations } from '@/lib/supabase/database.types';
+import { format, differenceInDays } from 'date-fns';
 import { Star } from 'lucide-react';
+import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
 
 export default function SettlementPage() {
   const [selectedYear, setSelectedYear] = useState('2025');
@@ -16,6 +18,39 @@ export default function SettlementPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [projectCategories, setProjectCategories] = useState<ProjectCategory[]>([]);
+  const [members, setMembers] = useState<MemberWithRelations[]>([]);
+  const [opexes, setOpexes] = useState<Opex[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [projectsData, receiptsData, categoriesData, membersData, opexData, schedulesData] = await Promise.all([
+          getProjects(),
+          getReceipts(),
+          getProjectCategories(),
+          getMembers(),
+          getOpexList(),
+          getSchedules(),
+        ]);
+        setProjects(projectsData);
+        setReceipts(receiptsData);
+        setProjectCategories(categoriesData);
+        setMembers(membersData);
+        setOpexes(opexData);
+        setSchedules(schedulesData);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, []);
 
   const getStatusLabel = (status: string) => {
     const labels: Record<string, string> = {
@@ -37,28 +72,120 @@ export default function SettlementPage() {
     return colors[status] || 'bg-gray-100 text-gray-700';
   };
 
-  const getPaymentStageColor = (stage: string | null | undefined) => {
-    if (!stage) return 'bg-gray-100 text-gray-500';
-    const colors: Record<string, string> = {
-      선금: 'bg-yellow-100 text-yellow-700',
-      중도금: 'bg-blue-100 text-blue-700',
-      잔금: 'bg-purple-100 text-purple-700',
-      완료: 'bg-green-100 text-green-700',
-    };
-    return colors[stage] || 'bg-gray-100 text-gray-700';
+  // 남은 기간 계산
+  const getRemainingDays = (endDate: string) => {
+    const today = new Date();
+    const end = new Date(endDate);
+    return differenceInDays(end, today);
+  };
+
+  // 남은 기간에 따른 색상
+  const getRemainingDaysColor = (days: number) => {
+    if (days < 0) return 'text-gray-400'; // 마감됨
+    if (days <= 3) return 'text-red-600 font-bold'; // 3일 이하
+    if (days <= 7) return 'text-red-500 font-semibold'; // 7일 이하
+    if (days <= 14) return 'text-orange-500 font-medium'; // 14일 이하
+    if (days <= 30) return 'text-yellow-600'; // 30일 이하
+    return 'text-gray-600'; // 여유 있음
+  };
+
+  // 남은 기간 배경색
+  const getRemainingDaysBgColor = (days: number) => {
+    if (days < 0) return 'bg-gray-100'; // 마감됨
+    if (days <= 3) return 'bg-red-100'; // 3일 이하
+    if (days <= 7) return 'bg-red-50'; // 7일 이하
+    if (days <= 14) return 'bg-orange-50'; // 14일 이하
+    return ''; // 여유 있음
+  };
+
+  // 남은 기간 텍스트
+  const getRemainingDaysText = (days: number) => {
+    if (days < 0) return '마감';
+    if (days === 0) return 'D-Day';
+    return `D-${days}`;
+  };
+
+  // 프로젝트별 지출 총액 계산 (성과 페이지 로직과 동일)
+  const calculateProjectExpense = (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return 0;
+
+    const allocations = project.member_allocations || [];
+    let totalExpense = 0;
+
+    // 활성 멤버들의 총 연봉
+    const activeMembers = members.filter((m) => m.is_active && m.is_approved);
+    const totalAnnualSalary = activeMembers.reduce((sum, m) => sum + m.annual_salary, 0);
+    const totalMonthlySalary = totalAnnualSalary / 12;
+
+    allocations.forEach((allocation: any) => {
+      const member = members.find((m) => m.id === allocation.member_id);
+      if (!member) return;
+
+      // 해당 멤버의 프로젝트 스케줄
+      const memberSchedules = schedules.filter(
+        (s) => s.member_id === member.id && s.project_id === projectId
+      );
+
+      if (memberSchedules.length === 0) return;
+
+      // 개인 연봉 비중
+      const salaryRatio = totalAnnualSalary > 0 ? member.annual_salary / totalAnnualSalary : 0;
+
+      // 스케줄을 월별로 그룹화
+      const schedulesByMonth: { [yearMonth: string]: { minutes: number } } = {};
+      memberSchedules.forEach((s) => {
+        const yearMonth = getYearMonthFromDate(s.date);
+        if (!schedulesByMonth[yearMonth]) {
+          schedulesByMonth[yearMonth] = { minutes: 0 };
+        }
+        schedulesByMonth[yearMonth].minutes += s.minutes;
+      });
+
+      // 각 월별로 계산
+      Object.entries(schedulesByMonth).forEach(([yearMonth, data]) => {
+        const [year, month] = yearMonth.split('-').map(Number);
+        const workingDaysInMonth = getWorkingDaysInMonth(year, month);
+
+        // 해당 월의 운영비 찾기
+        const monthOpex = opexes.find((o) => o.year_month === yearMonth);
+        const opexAmount = monthOpex?.amount || opexes[0]?.amount || 16000000;
+
+        // 판관비 = 운영비 - 전체 월급
+        const adminExpense = Math.max(0, opexAmount - totalMonthlySalary);
+
+        // 1일 1인 판관비 = 판관비 × 연봉비중 / 해당월 근무일수
+        const dailyOpex = workingDaysInMonth > 0
+          ? (adminExpense * salaryRatio) / workingDaysInMonth
+          : 0;
+
+        // 1일 매출원가 = 연봉 / 12 / 해당월 근무일수
+        const dailyCost = workingDaysInMonth > 0
+          ? (member.annual_salary / 12) / workingDaysInMonth
+          : 0;
+
+        // 1일 투입비
+        const dailyTotalCost = dailyCost + dailyOpex;
+
+        // 해당 월의 참여일수 (분 → 일)
+        const daysInMonth = data.minutes / 480;
+
+        // 해당 월의 투입비용
+        totalExpense += dailyTotalCost * daysInMonth;
+      });
+    });
+
+    return Math.round(totalExpense);
   };
 
   const calculateTotals = (projectId: string) => {
-    const projectReceipts = receipts.filter((r) => r.projectId === projectId);
-    const totalReceived = projectReceipts.reduce((sum, r) => sum + r.amount, 0);
-
-    // 임시 지출 (실제로는 expenses에서 계산해야 함)
-    const totalExpense = 0;
-
     const project = projects.find((p) => p.id === projectId);
-    const contractAmount = project?.contractAmount || 0;
+    const contractAmount = project?.contract_amount || 0;
 
-    const remainingBalance = contractAmount - totalReceived;
+    // 실제 지출 총액 계산
+    const totalExpense = calculateProjectExpense(projectId);
+
+    // 영업이익 = 계약금 - 지출총액
     const operatingProfit = contractAmount - totalExpense;
     const profitRate =
       contractAmount > 0 ? ((operatingProfit / contractAmount) * 100).toFixed(0) : '0';
@@ -67,36 +194,21 @@ export default function SettlementPage() {
       totalExpense,
       operatingProfit,
       profitRate,
-      remainingBalance,
-      totalReceived,
     };
   };
 
-  // 입금 단계 태그 목록 생성 (더미 로직)
-  const getPaymentStageTags = (projectId: string) => {
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) return [];
 
-    const tags: Array<'선금' | '중도금' | '잔금'> = [];
-    const totals = calculateTotals(projectId);
-    const receivedRatio = (totals.totalReceived / project.contractAmount) * 100;
-
-    // 간단한 로직: 입금 비율에 따라 태그 추가
-    if (receivedRatio > 0) tags.push('선금');
-    if (receivedRatio > 30) tags.push('중도금');
-    if (receivedRatio > 60) tags.push('잔금');
-
-    return tags;
-  };
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <PageHeader title="정산" description="프로젝트에 대한 정산 취합입니다." />
-
-      {/* 상단 안내 문구 */}
-      <div className="mb-6 bg-blue-500 text-white px-6 py-3 rounded-lg inline-block">
-        <p className="text-sm font-medium">프로젝트 정산 현황 및 담당자의 확인</p>
-      </div>
 
       <FilterBar onSearch={() => console.log('Search')}>
         <FilterSelect
@@ -141,16 +253,17 @@ export default function SettlementPage() {
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="px-4 py-3 text-left font-medium text-gray-700">프로젝트명</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">현황</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">유형</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-40">
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-44">
                 계약기간
               </th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24 whitespace-nowrap">남은기간</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">현황</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-28">유형</th>
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">계약금</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-48">
-                지급 총액
+              <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">
+                지출총액
               </th>
-              <th className="px-4 py-3 text-right font-medium text-gray-700 w-40">
+              <th className="px-4 py-3 text-right font-medium text-gray-700 w-36">
                 영업이익 (%)
               </th>
             </tr>
@@ -158,11 +271,11 @@ export default function SettlementPage() {
           <tbody className="divide-y divide-gray-200">
             {projects.map((project) => {
               const totals = calculateTotals(project.id);
-              const category = projectCategories.find((c) => c.id === project.categoryId);
-              const paymentTags = getPaymentStageTags(project.id);
+              const category = projectCategories.find((c) => c.id === project.category_id);
+              const remainingDays = getRemainingDays(project.end_date);
 
               return (
-                <tr key={project.id} className="hover:bg-gray-50">
+                <tr key={project.id} className={`hover:bg-gray-50 ${getRemainingDaysBgColor(remainingDays)}`}>
                   {/* 프로젝트명 + 별표 */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -171,6 +284,19 @@ export default function SettlementPage() {
                       </button>
                       <span className="text-gray-700">{project.name}</span>
                     </div>
+                  </td>
+
+                  {/* 계약기간 */}
+                  <td className="px-4 py-3 text-center text-gray-700 text-xs">
+                    {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
+                    {format(new Date(project.end_date), 'yyyy/MM/dd')}
+                  </td>
+
+                  {/* 남은기간 */}
+                  <td className="px-4 py-3 text-center">
+                    <span className={`text-sm ${getRemainingDaysColor(remainingDays)}`}>
+                      {getRemainingDaysText(remainingDays)}
+                    </span>
                   </td>
 
                   {/* 현황 */}
@@ -189,34 +315,14 @@ export default function SettlementPage() {
                     {category?.name || '-'}
                   </td>
 
-                  {/* 계약기간 */}
-                  <td className="px-4 py-3 text-center text-gray-700 text-xs">
-                    {format(new Date(project.startDate), 'yyyy/MM/dd')} ~{' '}
-                    {format(new Date(project.endDate), 'yyyy/MM/dd')}
-                  </td>
-
                   {/* 계약금 */}
                   <td className="px-4 py-3 text-right text-gray-700 font-medium">
-                    {project.contractAmount.toLocaleString()}원
+                    {project.contract_amount.toLocaleString()}원
                   </td>
 
-                  {/* 지급 총액 (여러 태그) */}
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1 flex-wrap">
-                      {paymentTags.map((tag) => (
-                        <span
-                          key={tag}
-                          className={`px-2 py-1 rounded text-xs font-medium ${getPaymentStageColor(
-                            tag
-                          )}`}
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                      {paymentTags.length === 0 && (
-                        <span className="text-gray-400 text-xs">입금</span>
-                      )}
-                    </div>
+                  {/* 지출총액 */}
+                  <td className="px-4 py-3 text-right text-gray-700 font-medium">
+                    {totals.totalExpense.toLocaleString()}원
                   </td>
 
                   {/* 영업이익 (금액 + %) */}
@@ -252,6 +358,8 @@ export default function SettlementPage() {
             setSelectedProjectId(null);
           }}
           projectId={selectedProjectId}
+          projects={projects}
+          receipts={receipts}
         />
       )}
     </div>
@@ -263,16 +371,20 @@ function ReceiptModal({
   isOpen,
   onClose,
   projectId,
+  projects,
+  receipts,
 }: {
   isOpen: boolean;
   onClose: () => void;
   projectId: string | null;
+  projects: Project[];
+  receipts: Receipt[];
 }) {
   const [selectedYear, setSelectedYear] = useState('2025');
   const [selectedProject, setSelectedProject] = useState(projectId || '전체');
 
   const projectReceipts = projectId
-    ? receipts.filter((r) => r.projectId === projectId)
+    ? receipts.filter((r) => r.project_id === projectId)
     : receipts;
 
   return (
@@ -358,7 +470,7 @@ function ReceiptModal({
             </thead>
             <tbody className="divide-y divide-gray-200">
               {projectReceipts.map((receipt) => {
-                const project = projects.find((p) => p.id === receipt.projectId);
+                const project = projects.find((p) => p.id === receipt.project_id);
                 return (
                   <tr key={receipt.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-700">{receipt.date}</td>

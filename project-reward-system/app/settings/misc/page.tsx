@@ -1,14 +1,46 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
 import { ToggleSwitch, SaveButton, DeleteButton, AddButton } from '@/components/ActionButtons';
-import { projectCategories, companyInfo } from '@/mocks/data';
+import { getProjectCategories } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
+import type { ProjectCategory } from '@/lib/supabase/database.types';
 import { Upload } from 'lucide-react';
 
 export default function MiscPage() {
-  const [companyName, setCompanyName] = useState(companyInfo.name);
-  const [logoUrl, setLogoUrl] = useState(companyInfo.logo);
+  const { member } = useAuthStore();
+  const [projectCategories, setProjectCategories] = useState<ProjectCategory[]>([]);
+  const [companyName, setCompanyName] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const categoriesData = await getProjectCategories();
+        setProjectCategories(categoriesData);
+        // 회사 정보는 member.organization에서 가져옴
+        if (member?.organization) {
+          setCompanyName(member.organization.name);
+          setLogoUrl(member.organization.logo || '');
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [member]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -49,7 +81,7 @@ export default function MiscPage() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <ToggleSwitch
-                        checked={category.isActive}
+                        checked={category.is_active}
                         onChange={(checked) => console.log('Active:', checked)}
                       />
                     </td>

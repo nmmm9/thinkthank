@@ -1,15 +1,68 @@
 'use client';
 
-import { useMemo, useCallback } from 'react';
-import { projects, schedules, members, teams, positions, opexes } from '@/mocks/data';
-import { startOfMonth, endOfMonth, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays, addDays } from 'date-fns';
+import { useMemo, useCallback, useEffect, useState } from 'react';
+import { getProjects, getSchedules, getMembers, getPositions, getOpexList } from '@/lib/api';
+import type { Project, Schedule, Member, Position, Opex } from '@/lib/supabase/database.types';
+import { startOfMonth, endOfMonth, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { ArrowRight, Star } from 'lucide-react';
 
+// 확장된 프로젝트 타입 (관계 데이터 포함)
+interface ProjectWithRelations extends Project {
+  category?: { id: string; name: string } | null;
+  team?: { id: string; name: string } | null;
+  allocations?: Array<{
+    member_id: string;
+    balance_percent: number;
+    member?: { id: string; name: string } | null;
+  }>;
+}
+
+// 확장된 스케줄 타입
+interface ScheduleWithRelations extends Schedule {
+  project?: Project | null;
+  member?: Member | null;
+}
+
 export default function Dashboard() {
+  const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleWithRelations[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [opexes, setOpexes] = useState<Opex[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const today = new Date();
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
+
+  // 데이터 로드
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [projectsData, schedulesData, membersData, positionsData, opexData] = await Promise.all([
+          getProjects(),
+          getSchedules(),
+          getMembers(),
+          getPositions(),
+          getOpexList(),
+        ]);
+
+        setProjects(projectsData as ProjectWithRelations[]);
+        setSchedules(schedulesData as ScheduleWithRelations[]);
+        setMembers(membersData as Member[]);
+        setPositions(positionsData);
+        setOpexes(opexData);
+      } catch (error) {
+        console.error('데이터 로드 실패:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
 
   // 성과 계산 함수
   const calculatePerformance = useCallback((startDate: Date, endDate: Date) => {
@@ -17,29 +70,29 @@ export default function Dashboard() {
     let totalCost = 0;
 
     projects.forEach((project) => {
-      const projectStart = new Date(project.startDate);
-      const projectEnd = new Date(project.endDate);
+      const projectStart = new Date(project.start_date);
+      const projectEnd = new Date(project.end_date);
 
       if (
         isWithinInterval(projectStart, { start: startDate, end: endDate }) ||
         isWithinInterval(projectEnd, { start: startDate, end: endDate }) ||
         (projectStart <= startDate && projectEnd >= endDate)
       ) {
-        totalRevenue += project.contractAmount;
+        totalRevenue += project.contract_amount;
       }
     });
 
     schedules.forEach((schedule) => {
       const scheduleDate = new Date(schedule.date);
       if (isWithinInterval(scheduleDate, { start: startDate, end: endDate })) {
-        const member = members.find((m) => m.id === schedule.memberId);
+        const member = members.find((m) => m.id === schedule.member_id);
         if (member) {
-          const position = positions.find((p) => p.id === member.positionId);
+          const position = positions.find((p) => p.id === member.position_id);
           const hours = schedule.minutes / 60;
 
-          const dailyCost = member.annualSalary / (12 * 20.917);
+          const dailyCost = member.annual_salary / (12 * 20.917);
           const yearMonth = format(scheduleDate, 'yyyy-MM');
-          const memberOpex = opexes.find((o) => o.yearMonth === yearMonth);
+          const memberOpex = opexes.find((o) => o.year_month === yearMonth);
           const salaryRatio = position ? 1 : 0;
           const opexAmount = memberOpex ? memberOpex.amount : 0;
           const dailyOpex = (opexAmount * salaryRatio) / 20.917;
@@ -54,7 +107,7 @@ export default function Dashboard() {
     const profitRate = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
 
     return { totalRevenue, totalCost, profit, profitRate };
-  }, []);
+  }, [projects, schedules, members, positions, opexes]);
 
   const todayPerformance = useMemo(() => {
     return calculatePerformance(startOfDay(today), endOfDay(today));
@@ -65,34 +118,36 @@ export default function Dashboard() {
   }, [monthStart, monthEnd, calculatePerformance]);
 
   const totalPerformance = useMemo(() => {
-    const allDates = [...projects.map((p) => new Date(p.startDate)), ...schedules.map((s) => new Date(s.date))];
+    const allDates = [...projects.map((p) => new Date(p.start_date)), ...schedules.map((s) => new Date(s.date))];
     if (allDates.length === 0) return { totalRevenue: 0, totalCost: 0, profit: 0, profitRate: 0 };
 
     const minDate = new Date(Math.min(...allDates.map((d) => d.getTime())));
     const maxDate = new Date(Math.max(...allDates.map((d) => d.getTime())));
 
     return calculatePerformance(minDate, maxDate);
-  }, [calculatePerformance]);
+  }, [projects, schedules, calculatePerformance]);
 
   const calendarDays = useMemo(() => {
     return eachDayOfInterval({ start: monthStart, end: monthEnd });
   }, [monthStart, monthEnd]);
 
-  const activeProjects = projects.filter((p) => {
-    const end = new Date(p.endDate);
-    return end >= today;
-  }).slice(0, 5);
+  const activeProjects = useMemo(() => {
+    return projects.filter((p) => {
+      const end = new Date(p.end_date);
+      return end >= today;
+    }).slice(0, 5);
+  }, [projects, today]);
 
   const topProjects = useMemo(() => {
     return projects
       .filter((p) => {
-        const end = new Date(p.endDate);
+        const end = new Date(p.end_date);
         return end >= today;
       })
       .slice(0, 3)
       .map((project) => {
-        const start = new Date(project.startDate);
-        const end = new Date(project.endDate);
+        const start = new Date(project.start_date);
+        const end = new Date(project.end_date);
         const total = differenceInDays(end, start);
         const elapsed = differenceInDays(today, start);
         const progress = Math.min(Math.max((elapsed / total) * 100, 0), 100);
@@ -100,7 +155,7 @@ export default function Dashboard() {
 
         return { ...project, progress, remainingDays };
       });
-  }, [today]);
+  }, [projects, today]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -123,6 +178,17 @@ export default function Dashboard() {
   };
 
   const avgPerformanceRate = Math.round((todayPerformance.profitRate + monthPerformance.profitRate + totalPerformance.profitRate) / 3);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          <p className="mt-4 text-gray-600">데이터 로딩 중...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -242,7 +308,7 @@ export default function Dashboard() {
           <div className="mb-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-medium text-gray-700">
-                {format(today, 'M월', { locale: ko })} <span className="text-gray-400">2024</span>
+                {format(today, 'M월', { locale: ko })} <span className="text-gray-400">{format(today, 'yyyy')}</span>
               </h3>
               <div className="flex items-center gap-2">
                 <button className="p-1 hover:bg-gray-100 rounded">
@@ -302,48 +368,52 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-3">
-            {activeProjects.map((project) => {
-              const start = new Date(project.startDate);
-              const end = new Date(project.endDate);
-              const total = differenceInDays(end, start);
-              const elapsed = differenceInDays(today, start);
-              const progress = Math.min(Math.max((elapsed / total) * 100, 0), 100);
+            {activeProjects.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4 text-center">프로젝트가 없습니다.</p>
+            ) : (
+              activeProjects.map((project) => {
+                const start = new Date(project.start_date);
+                const end = new Date(project.end_date);
+                const total = differenceInDays(end, start);
+                const elapsed = differenceInDays(today, start);
+                const progress = Math.min(Math.max((elapsed / total) * 100, 0), 100);
 
-              return (
-                <div key={project.id} className="flex items-center gap-3 py-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
-                        {project.name}
-                      </h3>
-                      <span
-                        className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(
-                          project.status
-                        )}`}
-                      >
-                        {getStatusLabel(project.status)}
-                      </span>
+                return (
+                  <div key={project.id} className="flex items-center gap-3 py-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="text-sm font-medium text-gray-900 truncate">
+                          {project.name}
+                        </h3>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(
+                            project.status
+                          )}`}
+                        >
+                          {getStatusLabel(project.status)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">
+                          {format(start, 'MM.dd')} ~ {format(end, 'MM.dd')}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">
-                        {format(start, 'MM.dd')} ~ {format(end, 'MM.dd')}
+                      <div className="w-24 bg-gray-100 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{ width: `${Math.round(progress)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium text-gray-600 w-8 text-right">
+                        {Math.round(progress)}%
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-24 bg-gray-100 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full transition-all"
-                        style={{ width: `${Math.round(progress)}%` }}
-                      />
-                    </div>
-                    <span className="text-xs font-medium text-gray-600 w-8 text-right">
-                      {Math.round(progress)}%
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -363,12 +433,12 @@ export default function Dashboard() {
                     {project.remainingDays}일
                   </span>
                   <span>
-                    {format(new Date(project.startDate), 'yyyy/MM/dd')} ~{' '}
-                    {format(new Date(project.endDate), 'yyyy/MM/dd')}
+                    {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
+                    {format(new Date(project.end_date), 'yyyy/MM/dd')}
                   </span>
                 </div>
               </div>
-              <Star className="w-5 h-5 text-blue-500" />
+              <Star className={`w-5 h-5 ${project.starred ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300'}`} />
             </div>
 
             <div className="space-y-3">
@@ -381,7 +451,7 @@ export default function Dashboard() {
                   {Math.round(project.progress)}%
                 </span>
                 <span className="text-lg font-semibold text-gray-900">
-                  {project.contractAmount.toLocaleString()}원
+                  {project.contract_amount.toLocaleString()}원
                 </span>
               </div>
             </div>

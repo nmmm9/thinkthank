@@ -1,12 +1,59 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
-import { AddButton, SaveButton } from '@/components/ActionButtons';
-import { holidays, workTimeSettings } from '@/mocks/data';
+import { AddButton } from '@/components/ActionButtons';
+import { Save } from 'lucide-react';
+import { getWorkTimeSetting } from '@/lib/api';
+import type { WorkTimeSetting } from '@/lib/supabase/database.types';
+
+// JSON 파일에서 공휴일 데이터 import
+import holiday2025 from '@/holiday_2025.json';
+import holiday2026 from '@/holiday_2026.json';
+
+type HolidayItem = { date: string; name: string };
+
+// 연도별 공휴일 데이터
+const holidayData: { [key: number]: HolidayItem[] } = {
+  2025: holiday2025['2025'],
+  2026: holiday2026['2026'],
+};
+
+const availableYears = Object.keys(holidayData).map(Number).sort();
 
 export default function WorkTimePage() {
-  const [workMinutes, setWorkMinutes] = useState(workTimeSettings.workMinutesPerDay);
+  const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
+  const [workMinutes, setWorkMinutes] = useState(480);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  // 선택된 연도의 공휴일
+  const holidays = holidayData[selectedYear] || [];
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const settingData = await getWorkTimeSetting();
+        setWorkTimeSetting(settingData);
+        if (settingData) {
+          setWorkMinutes(settingData.work_minutes_per_day);
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -19,56 +66,54 @@ export default function WorkTimePage() {
         {/* 휴일 목록 */}
         <div className="lg:col-span-2 bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">휴일</h2>
-            <AddButton onClick={() => console.log('Add holiday')} label="휴일 추가" />
+            <h2 className="text-lg font-semibold text-gray-900">공휴일</h2>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm"
+              >
+                {availableYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}년
+                  </option>
+                ))}
+              </select>
+              <AddButton onClick={() => console.log('Add holiday')} label="휴일 추가" />
+            </div>
           </div>
 
           <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                 <tr>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">
+                  <th className="px-4 py-3 text-center font-medium text-gray-700 w-40">
                     휴일 날짜
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-gray-700">휴일명칭</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">
-                    구분
-                  </th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">
-                    관리
-                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {holidays.map((holiday) => (
-                  <tr key={holiday.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-center text-gray-700">{holiday.date}</td>
-                    <td className="px-4 py-3 text-center text-gray-700">{holiday.name}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          holiday.type === 'auto'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-gray-100 text-gray-700'
-                        }`}
-                      >
-                        {holiday.type === 'auto' ? '자동 추가' : '수동 추가'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {holiday.type === 'manual' && (
-                        <button
-                          onClick={() => console.log('Delete')}
-                          className="text-red-600 hover:text-red-700 text-xs"
-                        >
-                          삭제
-                        </button>
-                      )}
+                {holidays.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-8 text-center text-gray-500">
+                      {selectedYear}년 공휴일 데이터가 없습니다.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  holidays.map((holiday, index) => (
+                    <tr key={`${holiday.date}-${index}`} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-center text-gray-700">{holiday.date}</td>
+                      <td className="px-4 py-3 text-center text-gray-700">{holiday.name}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-4 text-sm text-gray-500">
+            총 {holidays.length}개의 공휴일
           </div>
         </div>
 
@@ -99,7 +144,7 @@ export default function WorkTimePage() {
               onClick={() => console.log('Save work time')}
               className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors"
             >
-              <SaveButton onClick={() => {}} />
+              <Save className="w-4 h-4" />
               <span>저장</span>
             </button>
 
