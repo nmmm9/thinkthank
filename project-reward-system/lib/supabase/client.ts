@@ -1,0 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+import type { Database } from './database.types';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+// 환경변수가 없으면 경고 출력
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn('Supabase 환경변수가 설정되지 않았습니다. .env.local 파일을 확인하세요.');
+}
+
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
