@@ -23,7 +23,7 @@ type OpexWithItems = Opex & {
 
 export default function OpexPage() {
   const { member } = useAuthStore();
-  const [selectedYear, setSelectedYear] = useState('2025');
+  const [selectedYear, setSelectedYear] = useState('전체');
   const [opexes, setOpexes] = useState<OpexWithItems[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({});
@@ -142,7 +142,13 @@ export default function OpexPage() {
         <OpexAddModal
           isOpen={showAddModal}
           onClose={() => setShowAddModal(false)}
-          onSave={loadData}
+          onSave={(yearMonth?: string) => {
+            // 추가된 연도로 필터 변경
+            if (yearMonth) {
+              setSelectedYear(yearMonth.substring(0, 4));
+            }
+            loadData();
+          }}
           existingMonths={opexes.map((o) => o.year_month)}
           orgId={member?.organization?.id || ''}
         />
@@ -403,7 +409,7 @@ function OpexAddModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onSave: () => void;
+  onSave: (yearMonth?: string) => void;
   existingMonths: string[];
   orgId: string;
 }) {
@@ -465,7 +471,7 @@ function OpexAddModal({
         amount: totalAmount,
         items: items as any,
       });
-      onSave();
+      onSave(yearMonth);
       onClose();
     } catch (error) {
       console.error('저장 실패:', error);
@@ -475,10 +481,18 @@ function OpexAddModal({
     }
   };
 
-  // 연월 옵션 생성 (현재 월부터 12개월)
+  // 연월 옵션 생성 (미래 12개월 + 과거 24개월)
   const getMonthOptions = () => {
     const options = [];
     const now = new Date();
+    // 미래 12개월
+    for (let i = 12; i >= 1; i--) {
+      const date = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
+      options.push({ value, label });
+    }
+    // 현재 월 + 과거 24개월
     for (let i = 0; i < 24; i++) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;

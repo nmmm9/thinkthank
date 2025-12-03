@@ -18,6 +18,7 @@ import {
   Wallet,
   Clock,
   MoreHorizontal,
+  UserCheck,
 } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth-store';
 import { useSidebarStore } from '@/lib/sidebar-store';
@@ -51,6 +52,11 @@ const Sidebar = () => {
     { href: '/performance', label: '성과', icon: TrendingUp },
   ];
 
+  // 총괄관리자 전용 메뉴
+  const adminMenuItems = [
+    { href: '/admin/member-performance', label: '직원별 성과', icon: UserCheck },
+  ];
+
   // 설정 서브메뉴 (관리자만 전체 표시)
   const settingsMenuItems = [
     { href: '/settings/members', label: '팀원 관리', icon: Users },
@@ -61,7 +67,9 @@ const Sidebar = () => {
   ];
 
   // 관리자 여부 확인 (admin 또는 manager 모두 설정 메뉴 접근 가능)
-  const isAdmin = member?.role === 'admin' || member?.role === 'manager';
+  const isAdminOrManager = member?.role === 'admin' || member?.role === 'manager';
+  // 총괄관리자 여부 (admin만)
+  const isFullAdmin = member?.role === 'admin';
 
   const isActive = (href: string) => {
     if (href === '/') {
@@ -158,8 +166,32 @@ const Sidebar = () => {
             );
           })}
 
+          {/* 총괄관리자 전용 메뉴 */}
+          {isFullAdmin && adminMenuItems.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item.href);
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  className={`flex items-center ${
+                    isCollapsed ? 'justify-center' : 'gap-3'
+                  } px-4 py-3 rounded-lg transition-colors ${
+                    active
+                      ? 'bg-purple-50 text-purple-600 font-medium'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title={isCollapsed ? item.label : undefined}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  {!isCollapsed && <span className="text-sm">{item.label}</span>}
+                </Link>
+              </li>
+            );
+          })}
+
           {/* 설정 메뉴 (관리자용 - 서브메뉴 포함) */}
-          {isAdmin && (
+          {isAdminOrManager && (
             <li>
               <button
                 onClick={() => !isCollapsed && setIsSettingsOpen(!isSettingsOpen)}

@@ -497,6 +497,41 @@ export interface Database {
           created_at?: string
         }
       }
+      performance_comments: {
+        Row: {
+          id: string
+          org_id: string
+          project_id: string
+          member_id: string
+          author_id: string
+          content: string
+          is_read: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          project_id: string
+          member_id: string
+          author_id: string
+          content: string
+          is_read?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          project_id?: string
+          member_id?: string
+          author_id?: string
+          content?: string
+          is_read?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never
@@ -535,6 +570,7 @@ export type Opex = Database['public']['Tables']['opex']['Row']
 export type Holiday = Database['public']['Tables']['holidays']['Row']
 export type WorkTimeSetting = Database['public']['Tables']['work_time_settings']['Row']
 export type Invitation = Database['public']['Tables']['invitations']['Row']
+export type PerformanceComment = Database['public']['Tables']['performance_comments']['Row']
 
 // Insert/Update 타입
 export type MemberInsert = Database['public']['Tables']['members']['Insert']

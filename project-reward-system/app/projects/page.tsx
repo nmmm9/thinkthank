@@ -33,34 +33,36 @@ export default function ProjectsPage() {
   // 관리자 권한 체크 (admin 또는 manager만 추가/수정 가능)
   const canManageProject = member?.role === 'admin' || member?.role === 'manager';
 
-  // 데이터 로드
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setIsLoading(true);
-        const [projectsData, categoriesData, membersData, opexData] = await Promise.all([
-          getProjects(),
-          getProjectCategories(),
-          getMembers(),
-          getOpexList(),
-        ]);
-        setProjects(projectsData as ProjectWithRelations[]);
-        setProjectCategories(categoriesData);
-        setMembers(membersData);
-        setOpexes(opexData);
+  // 데이터 로드 함수
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [projectsData, categoriesData, membersData, opexData] = await Promise.all([
+        getProjects(),
+        getProjectCategories(),
+        getMembers(),
+        getOpexList(),
+      ]);
+      setProjects(projectsData as ProjectWithRelations[]);
+      setProjectCategories(categoriesData);
+      setMembers(membersData);
+      setOpexes(opexData);
 
-        // 즐겨찾기 상태 초기화
-        const starredState = (projectsData as ProjectWithRelations[]).reduce(
-          (acc, p) => ({ ...acc, [p.id]: p.starred || false }),
-          {}
-        );
-        setStarredProjects(starredState);
-      } catch (error) {
-        console.error('데이터 로드 실패:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      // 즐겨찾기 상태 초기화
+      const starredState = (projectsData as ProjectWithRelations[]).reduce(
+        (acc, p) => ({ ...acc, [p.id]: p.starred || false }),
+        {}
+      );
+      setStarredProjects(starredState);
+    } catch (error) {
+      console.error('데이터 로드 실패:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 초기 데이터 로드
+  useEffect(() => {
     loadData();
   }, []);
 
@@ -132,12 +134,11 @@ export default function ProjectsPage() {
   };
 
   // 프로젝트 수정 후 목록 갱신
-  const handleProjectUpdated = (updatedProject: Project) => {
-    setProjects((prev) =>
-      prev.map((p) => (p.id === updatedProject.id ? { ...p, ...updatedProject } : p))
-    );
+  const handleProjectUpdated = async () => {
     setShowEditModal(false);
     setSelectedProject(null);
+    // 전체 데이터 다시 로드 (팀원 배정 포함)
+    await loadData();
   };
 
   // 검색 필터링
@@ -479,10 +480,24 @@ function ProjectFormModal({
   const isEditMode = !!project;
   const [isSaving, setIsSaving] = useState(false);
 
+  // ESC 키로 모달 닫기
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSaving) {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, isSaving, onClose]);
+
   const [projectName, setProjectName] = useState(project?.name || '');
   const [projectType, setProjectType] = useState(project?.category_id || '');
   const [projectStatus, setProjectStatus] = useState(project?.status || '');
-  const [projectPM, setProjectPM] = useState(project?.contact_name || '');
   const [contractStartDate, setContractStartDate] = useState(project?.start_date || '');
   const [contractEndDate, setContractEndDate] = useState(project?.end_date || '');
   const [projectStartDate, setProjectStartDate] = useState(project?.start_date || '');
@@ -864,18 +879,6 @@ function ProjectFormModal({
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                프로젝트 PM
-              </label>
-              <input
-                type="text"
-                value={projectPM}
-                onChange={(e) => setProjectPM(e.target.value)}
-                placeholder="PM 이름"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
           </div>
 
           {/* 프로젝트명 */}
@@ -1369,13 +1372,14 @@ function ProjectFormModal({
                   end_date: contractEndDate,
                   contract_amount: parseInt(contractAmount) || totalContractAmount,
                   memo: memo || null,
-                  contact_name: projectPM || null,
                   company_share_percent: parseInt(companySharePercent) || 80,
                 };
 
                 let savedProject: Project;
                 if (isEditMode && project) {
-                  savedProject = await updateProject(project.id, projectData) as Project;
+                  await updateProject(project.id, projectData);
+                  // 수정 모드에서는 기존 project 정보 유지 (org_id 포함)
+                  savedProject = { ...project, ...projectData } as Project;
                 } else {
                   // 새 프로젝트 생성 시 org_id 추가
                   savedProject = await createProject({
@@ -1388,6 +1392,12 @@ function ProjectFormModal({
                 if (savedProject && teamMembers.length > 0) {
                   const validMembers = teamMembers.filter((m) => m.memberId);
                   if (validMembers.length > 0) {
+                    console.log('setProjectAllocations 호출:', {
+                      projectId: savedProject.id,
+                      orgId: savedProject.org_id,
+                      membersCount: validMembers.length,
+                      validMembers,
+                    });
                     await setProjectAllocations(
                       savedProject.id,
                       savedProject.org_id,

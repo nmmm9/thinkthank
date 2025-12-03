@@ -7,3 +7,4 @@ export * from './receipts';
 export * from './opex';
 export * from './settings';
 export * from './project-categories';
+export * from './performance-comments';

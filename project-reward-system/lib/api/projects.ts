@@ -93,29 +93,37 @@ export async function setProjectAllocations(
     endDate?: string;
   }>
 ) {
+  console.log('API setProjectAllocations:', { projectId, orgId, allocationsCount: allocations.length });
+
   // 기존 배분 삭제
-  await (supabase
+  const { error: deleteError } = await (supabase
     .from('project_member_allocations') as any)
     .delete()
     .eq('project_id', projectId);
 
+  console.log('Delete result:', { deleteError });
+  if (deleteError) throw deleteError;
+
   // 새 배분 추가
   if (allocations.length > 0) {
+    const insertData = allocations.map((a) => ({
+      org_id: orgId,
+      project_id: projectId,
+      member_id: a.memberId,
+      balance_percent: a.balancePercent || 0,
+      allocated_amount: a.allocatedAmount || 0,
+      planned_days: a.plannedDays || 0,
+      start_date: a.startDate || null,
+      end_date: a.endDate || null,
+    }));
+    console.log('Insert data:', insertData);
+
     const { error } = await (supabase
       .from('project_member_allocations') as any)
-      .insert(
-        allocations.map((a) => ({
-          org_id: orgId,
-          project_id: projectId,
-          member_id: a.memberId,
-          balance_percent: a.balancePercent || 0,
-          allocated_amount: a.allocatedAmount || 0,
-          planned_days: a.plannedDays || 0,
-          start_date: a.startDate || null,
-          end_date: a.endDate || null,
-        }))
-      );
+      .insert(insertData);
 
+    console.log('Insert result:', { error });
     if (error) throw error;
   }
+  console.log('setProjectAllocations 완료');
 }

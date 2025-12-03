@@ -1,16 +1,20 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { getProjects, getMembers, getOpexList, getSchedules } from '@/lib/api';
 import type { Project, Opex, MemberWithRelations, Schedule } from '@/lib/supabase/database.types';
-import { ChevronDown, ChevronRight, Briefcase } from 'lucide-react';
+import { ChevronDown, ChevronRight, Briefcase, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
 import { useAuthStore } from '@/lib/auth-store';
+import PerformanceCommentModal from '@/components/PerformanceCommentModal';
 
 export default function PerformancePage() {
   const { member: currentUser } = useAuthStore();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [selectedYear, setSelectedYear] = useState('2025');
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
@@ -19,6 +23,56 @@ export default function PerformancePage() {
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 코멘트 모달 상태
+  const [commentModal, setCommentModal] = useState<{
+    isOpen: boolean;
+    projectId: string;
+    projectName: string;
+    memberId: string;
+    memberName: string;
+  }>({
+    isOpen: false,
+    projectId: '',
+    projectName: '',
+    memberId: '',
+    memberName: '',
+  });
+
+  const openCommentModal = (projectId: string, projectName: string, memberId: string, memberName: string) => {
+    setCommentModal({
+      isOpen: true,
+      projectId,
+      projectName,
+      memberId,
+      memberName,
+    });
+  };
+
+  const closeCommentModal = () => {
+    setCommentModal((prev) => ({ ...prev, isOpen: false }));
+    // URL 파라미터 제거
+    router.replace('/performance', { scroll: false });
+  };
+
+  // URL 파라미터로 모달 자동 열기 (알림에서 클릭 시)
+  useEffect(() => {
+    const openComment = searchParams.get('openComment');
+    const projectId = searchParams.get('projectId');
+    const memberId = searchParams.get('memberId');
+    const projectName = searchParams.get('projectName');
+    const memberName = searchParams.get('memberName');
+
+    if (openComment === 'true' && projectId && memberId) {
+      setCommentModal({
+        isOpen: true,
+        projectId,
+        projectName: projectName || '',
+        memberId,
+        memberName: memberName || '',
+      });
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -390,6 +444,7 @@ export default function PerformancePage() {
                               <th className="px-4 py-3 text-center font-medium text-gray-700">효율</th>
                               <th className="px-4 py-3 text-right font-medium text-gray-700">배분 비율</th>
                               <th className="px-4 py-3 text-right font-medium text-gray-700">배분 금액</th>
+                              <th className="px-4 py-3 text-center font-medium text-gray-700">피드백</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
@@ -421,6 +476,15 @@ export default function PerformancePage() {
                                   </td>
                                   <td className={`px-4 py-3 text-right font-bold ${perf.shareAmount > 0 ? 'text-green-600' : 'text-gray-400'}`}>
                                     {perf.shareAmount > 0 ? `${perf.shareAmount.toLocaleString()}원` : '0원'}
+                                  </td>
+                                  <td className="px-4 py-3 text-center">
+                                    <button
+                                      onClick={() => openCommentModal(project.id, project.name, perf.memberId, perf.memberName)}
+                                      className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      title="피드백 보기/작성"
+                                    >
+                                      <MessageSquare className="w-4 h-4" />
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -475,6 +539,17 @@ export default function PerformancePage() {
                           </div>
                         </div>
                       </div>
+
+                      {/* 피드백 확인 버튼 - 일반 사원용 */}
+                      {currentUser && (
+                        <button
+                          onClick={() => openCommentModal(project.id, project.name, currentUser.id, currentUser.name)}
+                          className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                        >
+                          <MessageSquare className="w-5 h-5" />
+                          <span>피드백 확인하기</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -483,6 +558,16 @@ export default function PerformancePage() {
           );
         })}
       </div>
+
+      {/* 코멘트 모달 */}
+      <PerformanceCommentModal
+        isOpen={commentModal.isOpen}
+        onClose={closeCommentModal}
+        projectId={commentModal.projectId}
+        projectName={commentModal.projectName}
+        memberId={commentModal.memberId}
+        memberName={commentModal.memberName}
+      />
     </div>
   );
 }
