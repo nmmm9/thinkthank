@@ -4,20 +4,18 @@ import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import { ToggleSwitch, SaveButton, DeleteButton } from '@/components/ActionButtons';
-import { getMembers, getTeams, getPositions, updateMember, deleteMember } from '@/lib/api';
-import type { Member, Team, Position } from '@/lib/supabase/database.types';
+import { getMembers, getTeams, updateMember, deleteMember } from '@/lib/api';
+import type { Member, Team } from '@/lib/supabase/database.types';
 import { Eye } from 'lucide-react';
 
 // 확장된 멤버 타입
 interface MemberWithRelations extends Member {
   team?: Team | null;
-  position?: Position | null;
 }
 
 export default function MembersPage() {
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -28,14 +26,12 @@ export default function MembersPage() {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        const [membersData, teamsData, positionsData] = await Promise.all([
+        const [membersData, teamsData] = await Promise.all([
           getMembers(),
           getTeams(),
-          getPositions(),
         ]);
         setMembers(membersData as MemberWithRelations[]);
         setTeams(teamsData);
-        setPositions(positionsData);
       } catch (error) {
         console.error('데이터 로드 실패:', error);
       } finally {
@@ -151,7 +147,6 @@ export default function MembersPage() {
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">팀원</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">직급</th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">팀</th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-40">연봉</th>
               <th className="px-4 py-3 text-left font-medium text-gray-700">이메일</th>
@@ -171,20 +166,6 @@ export default function MembersPage() {
             {filteredMembers.map((member) => (
               <tr key={member.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-center text-gray-700">{member.name}</td>
-                <td className="px-4 py-3 text-center">
-                  <select
-                    value={getValue(member, 'position_id') as string || ''}
-                    onChange={(e) => handleFieldChange(member.id, 'position_id', e.target.value)}
-                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <option value="">선택</option>
-                    {positions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </td>
                 <td className="px-4 py-3 text-center">
                   <select
                     value={getValue(member, 'team_id') as string || ''}

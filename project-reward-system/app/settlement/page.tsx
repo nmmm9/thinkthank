@@ -110,7 +110,8 @@ export default function SettlementPage() {
     const project = projects.find((p) => p.id === projectId);
     if (!project) return 0;
 
-    const allocations = project.member_allocations || [];
+    // API에서는 allocations로 조인됨
+    const allocations = (project as any).allocations || [];
     let totalExpense = 0;
 
     // 활성 멤버들의 총 연봉

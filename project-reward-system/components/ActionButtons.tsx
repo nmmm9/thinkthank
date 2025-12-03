@@ -14,10 +14,15 @@ export const EditButton = ({ onClick }: { onClick: () => void }) => (
 
 
 
-export const SaveButton = ({ onClick }: { onClick: () => void }) => (
+export const SaveButton = ({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) => (
   <button
     onClick={onClick}
-    className="p-2 text-purple-600 hover:bg-purple-50 rounded transition-colors"
+    disabled={disabled}
+    className={`p-2 rounded transition-colors ${
+      disabled
+        ? 'text-gray-400 cursor-not-allowed'
+        : 'text-purple-600 hover:bg-purple-50'
+    }`}
     title="저장"
   >
     <Save className="w-4 h-4" />

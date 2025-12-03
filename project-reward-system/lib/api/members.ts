@@ -1,14 +1,13 @@
 import { supabase } from '@/lib/supabase/client';
 import type { MemberInsert, MemberUpdate } from '@/lib/supabase/database.types';
 
-// 멤버 목록 조회 (팀, 직급 정보 포함)
+// 멤버 목록 조회 (팀 정보 포함)
 export async function getMembers() {
   const { data, error } = await supabase
     .from('members')
     .select(`
       *,
-      team:teams(*),
-      position:positions(*)
+      team:teams(*)
     `)
     .order('name');
 
@@ -22,8 +21,7 @@ export async function getMember(id: string) {
     .from('members')
     .select(`
       *,
-      team:teams(*),
-      position:positions(*)
+      team:teams(*)
     `)
     .eq('id', id)
     .single();
@@ -38,8 +36,7 @@ export async function getMemberByEmail(email: string) {
     .from('members')
     .select(`
       *,
-      team:teams(*),
-      position:positions(*)
+      team:teams(*)
     `)
     .eq('email', email)
     .single();
@@ -55,7 +52,6 @@ export async function getMemberByAuthId(authUserId: string) {
     .select(`
       *,
       team:teams(*),
-      position:positions(*),
       organization:organizations(*)
     `)
     .eq('auth_user_id', authUserId)
@@ -106,8 +102,7 @@ export async function getActiveMembers() {
     .from('members')
     .select(`
       *,
-      team:teams(*),
-      position:positions(*)
+      team:teams(*)
     `)
     .eq('is_active', true)
     .eq('is_approved', true)
@@ -123,8 +118,7 @@ export async function getMembersByTeam(teamId: string) {
     .from('members')
     .select(`
       *,
-      team:teams(*),
-      position:positions(*)
+      team:teams(*)
     `)
     .eq('team_id', teamId)
     .order('name');

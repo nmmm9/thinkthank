@@ -3,17 +3,12 @@ import { supabase } from '@/lib/supabase/client';
 import type { Member } from '@/lib/supabase/database.types';
 import type { User } from '@supabase/supabase-js';
 
-// 확장된 멤버 타입 (팀, 직급, 조직 정보 포함)
+// 확장된 멤버 타입 (팀, 조직 정보 포함)
 export interface MemberWithRelations extends Member {
   team?: {
     id: string;
     name: string;
     is_active: boolean;
-  } | null;
-  position?: {
-    id: string;
-    name: string;
-    level: number;
   } | null;
   organization?: {
     id: string;
@@ -72,7 +67,6 @@ export const useAuthStore = create<AuthState>()((set) => ({
         .select(`
           *,
           team:teams(*),
-          position:positions(*),
           organization:organizations(*)
         `)
         .eq('auth_user_id', data.user.id)
@@ -162,7 +156,6 @@ export const useAuthStore = create<AuthState>()((set) => ({
         .select(`
           *,
           team:teams(*),
-          position:positions(*),
           organization:organizations(*)
         `)
         .eq('auth_user_id', session.user.id)

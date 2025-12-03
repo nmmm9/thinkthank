@@ -73,38 +73,6 @@ export interface Database {
           updated_at?: string
         }
       }
-      positions: {
-        Row: {
-          id: string
-          org_id: string
-          name: string
-          level: number
-          is_active: boolean
-          sort_order: number
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          org_id: string
-          name: string
-          level?: number
-          is_active?: boolean
-          sort_order?: number
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          org_id?: string
-          name?: string
-          level?: number
-          is_active?: boolean
-          sort_order?: number
-          created_at?: string
-          updated_at?: string
-        }
-      }
       project_categories: {
         Row: {
           id: string
@@ -143,7 +111,6 @@ export interface Database {
           email: string
           login_id: string | null
           team_id: string | null
-          position_id: string | null
           role: string
           annual_salary: number
           is_approved: boolean
@@ -160,7 +127,6 @@ export interface Database {
           email: string
           login_id?: string | null
           team_id?: string | null
-          position_id?: string | null
           role?: string
           annual_salary?: number
           is_approved?: boolean
@@ -177,7 +143,6 @@ export interface Database {
           email?: string
           login_id?: string | null
           team_id?: string | null
-          position_id?: string | null
           role?: string
           annual_salary?: number
           is_approved?: boolean
@@ -206,6 +171,7 @@ export interface Database {
           contact_name: string | null
           contact_phone: string | null
           memo: string | null
+          company_share_percent: number
           created_at: string
           updated_at: string
         }
@@ -227,6 +193,7 @@ export interface Database {
           contact_name?: string | null
           contact_phone?: string | null
           memo?: string | null
+          company_share_percent?: number
           created_at?: string
           updated_at?: string
         }
@@ -248,6 +215,7 @@ export interface Database {
           contact_name?: string | null
           contact_phone?: string | null
           memo?: string | null
+          company_share_percent?: number
           created_at?: string
           updated_at?: string
         }
@@ -301,6 +269,9 @@ export interface Database {
           member_id: string
           date: string
           minutes: number
+          start_time: string | null
+          end_time: string | null
+          description: string | null
           created_at: string
           updated_at: string
         }
@@ -311,6 +282,9 @@ export interface Database {
           member_id: string
           date: string
           minutes?: number
+          start_time?: string | null
+          end_time?: string | null
+          description?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -321,6 +295,9 @@ export interface Database {
           member_id?: string
           date?: string
           minutes?: number
+          start_time?: string | null
+          end_time?: string | null
+          description?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -538,7 +515,6 @@ export interface Database {
 // 편의를 위한 타입 별칭
 export type Organization = Database['public']['Tables']['organizations']['Row']
 export type Team = Database['public']['Tables']['teams']['Row']
-export type Position = Database['public']['Tables']['positions']['Row']
 export type ProjectCategory = Database['public']['Tables']['project_categories']['Row']
 export type Member = Database['public']['Tables']['members']['Row']
 export type Project = Database['public']['Tables']['projects']['Row']
@@ -560,5 +536,3 @@ export type ScheduleInsert = Database['public']['Tables']['schedules']['Insert']
 export type ScheduleUpdate = Database['public']['Tables']['schedules']['Update']
 export type TeamInsert = Database['public']['Tables']['teams']['Insert']
 export type TeamUpdate = Database['public']['Tables']['teams']['Update']
-export type PositionInsert = Database['public']['Tables']['positions']['Insert']
-export type PositionUpdate = Database['public']['Tables']['positions']['Update']

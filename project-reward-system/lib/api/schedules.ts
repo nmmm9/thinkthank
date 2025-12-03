@@ -91,7 +91,10 @@ export async function createSchedule(schedule: ScheduleInsert) {
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error('createSchedule error:', error);
+    throw new Error(error.message || JSON.stringify(error));
+  }
   return data;
 }
 

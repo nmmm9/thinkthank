@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo, useCallback, useEffect, useState } from 'react';
-import { getProjects, getSchedules, getMembers, getPositions, getOpexList } from '@/lib/api';
-import type { Project, Schedule, Member, Position, Opex } from '@/lib/supabase/database.types';
-import { startOfMonth, endOfMonth, startOfDay, endOfDay, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays } from 'date-fns';
+import { getProjects, getSchedules, getMembers, getOpexList } from '@/lib/api';
+import type { Project, Schedule, Member, Opex } from '@/lib/supabase/database.types';
+import { startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { ArrowRight, Star } from 'lucide-react';
 
@@ -28,7 +28,6 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
   const [schedules, setSchedules] = useState<ScheduleWithRelations[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -41,18 +40,16 @@ export default function Dashboard() {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        const [projectsData, schedulesData, membersData, positionsData, opexData] = await Promise.all([
+        const [projectsData, schedulesData, membersData, opexData] = await Promise.all([
           getProjects(),
           getSchedules(),
           getMembers(),
-          getPositions(),
           getOpexList(),
         ]);
 
         setProjects(projectsData as ProjectWithRelations[]);
         setSchedules(schedulesData as ScheduleWithRelations[]);
         setMembers(membersData as Member[]);
-        setPositions(positionsData);
         setOpexes(opexData);
       } catch (error) {
         console.error('데이터 로드 실패:', error);
@@ -87,15 +84,13 @@ export default function Dashboard() {
       if (isWithinInterval(scheduleDate, { start: startDate, end: endDate })) {
         const member = members.find((m) => m.id === schedule.member_id);
         if (member) {
-          const position = positions.find((p) => p.id === member.position_id);
           const hours = schedule.minutes / 60;
 
           const dailyCost = member.annual_salary / (12 * 20.917);
           const yearMonth = format(scheduleDate, 'yyyy-MM');
           const memberOpex = opexes.find((o) => o.year_month === yearMonth);
-          const salaryRatio = position ? 1 : 0;
           const opexAmount = memberOpex ? memberOpex.amount : 0;
-          const dailyOpex = (opexAmount * salaryRatio) / 20.917;
+          const dailyOpex = opexAmount / 20.917;
           const dailyTotal = dailyCost + dailyOpex;
 
           totalCost += (dailyTotal * hours) / 8;
@@ -107,11 +102,23 @@ export default function Dashboard() {
     const profitRate = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
 
     return { totalRevenue, totalCost, profit, profitRate };
-  }, [projects, schedules, members, positions, opexes]);
+  }, [projects, schedules, members, opexes]);
 
-  const todayPerformance = useMemo(() => {
-    return calculatePerformance(startOfDay(today), endOfDay(today));
-  }, [today, calculatePerformance]);
+  // 올해 총 매출 계산
+  const yearlyRevenue = useMemo(() => {
+    const yearStart = startOfYear(today);
+    const yearEnd = endOfYear(today);
+
+    return projects
+      .filter((project) => {
+        const projectEnd = new Date(project.end_date);
+        // 올해 종료된 프로젝트 (완료된 프로젝트의 계약금 합계)
+        return project.status === 'completed' &&
+               projectEnd >= yearStart &&
+               projectEnd <= yearEnd;
+      })
+      .reduce((sum, project) => sum + project.contract_amount, 0);
+  }, [projects, today]);
 
   const monthPerformance = useMemo(() => {
     return calculatePerformance(monthStart, monthEnd);
@@ -177,7 +184,7 @@ export default function Dashboard() {
     return labels[status] || status;
   };
 
-  const avgPerformanceRate = Math.round((todayPerformance.profitRate + monthPerformance.profitRate + totalPerformance.profitRate) / 3);
+  const avgPerformanceRate = Math.round((monthPerformance.profitRate + totalPerformance.profitRate) / 2);
 
   if (isLoading) {
     return (
@@ -208,32 +215,29 @@ export default function Dashboard() {
 
         {/* 성과 카드 3개 */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 오늘 성과 */}
+          {/* 올해의 총 매출 */}
           <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
             <div className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                <span className="text-blue-600 text-sm">📊</span>
+                <span className="text-blue-600 text-sm">💰</span>
               </div>
-              <h3 className="text-lg font-semibold text-gray-900">오늘 성과</h3>
+              <h3 className="text-lg font-semibold text-gray-900">올해의 총 매출</h3>
             </div>
             <div className="space-y-3">
               <div className="flex items-baseline justify-between">
-                <span className="text-sm text-gray-600">전체 프로젝트</span>
+                <span className="text-sm text-gray-600">{today.getFullYear()}년</span>
                 <div className="text-right">
                   <span className="text-2xl font-bold text-gray-900">
-                    {todayPerformance.profit.toLocaleString()}
+                    {yearlyRevenue.toLocaleString()}
                   </span>
                   <span className="text-sm text-gray-600">원</span>
                 </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">계약 성과</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900">0원</span>
-                  <span className="text-xs text-green-600 font-medium">
-                    {Math.round(todayPerformance.profitRate)}%
-                  </span>
-                </div>
+                <span className="text-xs text-gray-500">완료된 프로젝트 기준</span>
+                <span className="text-xs text-blue-600 font-medium">
+                  {projects.filter(p => p.status === 'completed').length}개 프로젝트
+                </span>
               </div>
             </div>
           </div>

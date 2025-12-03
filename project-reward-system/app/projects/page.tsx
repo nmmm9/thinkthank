@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getProjects, getProjectCategories, toggleProjectStar, updateProject, createProject, getMembers, getOpexList, setProjectAllocations } from '@/lib/api';
 import type { Project, ProjectCategory, MemberWithRelations, Opex } from '@/lib/supabase/database.types';
+import { useAuthStore } from '@/lib/auth-store';
 import { differenceInDays, format, addDays } from 'date-fns';
 import { Star, Search, Edit2 } from 'lucide-react';
 import { getWorkingDaysInMonth, getYearMonthFromDate, addWorkingDays, getWorkingDaysBetween } from '@/lib/utils/workdays';
@@ -10,22 +11,27 @@ import { getWorkingDaysInMonth, getYearMonthFromDate, addWorkingDays, getWorking
 // 확장된 프로젝트 타입
 interface ProjectWithRelations extends Project {
   category?: ProjectCategory | null;
+  allocations?: Array<{
+    member_id: string;
+    member?: { id: string; name: string } | null;
+  }>;
 }
 
 export default function ProjectsPage() {
+  const { member } = useAuthStore();
   const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
   const [projectCategories, setProjectCategories] = useState<ProjectCategory[]>([]);
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
   const [starredProjects, setStarredProjects] = useState<Record<string, boolean>>({});
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedProject, setSelectedProject] = useState<ProjectWithRelations | null>(null);
 
-  const itemsPerPage = 10;
+  // 관리자 권한 체크 (admin 또는 manager만 추가/수정 가능)
+  const canManageProject = member?.role === 'admin' || member?.role === 'manager';
 
   // 데이터 로드
   useEffect(() => {
@@ -79,17 +85,18 @@ export default function ProjectsPage() {
   };
 
   // 실행률 계산 (시작일부터 오늘까지 / 전체 기간)
-  const calculateExecutionRate = (startDate: string, endDate: string) => {
+  const calculateExecutionRate = (startDate: string, endDate: string, status: string) => {
+    // 완료된 프로젝트는 100%
+    if (status === 'completed') return 100;
+
     const start = new Date(startDate);
     const end = new Date(endDate);
     const today = new Date();
 
+    // 시작 전이면 0%
     if (today < start) return 0;
-    if (today > end) {
-      const total = differenceInDays(end, start);
-      const elapsed = differenceInDays(today, start);
-      return Math.round((elapsed / total) * 100);
-    }
+    // 종료일이 지났으면 100%
+    if (today > end) return 100;
 
     const total = differenceInDays(end, start);
     const elapsed = differenceInDays(today, start);
@@ -138,44 +145,21 @@ export default function ProjectsPage() {
     project.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // 페이지네이션
-  const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const currentProjects = filteredProjects.slice(startIndex, endIndex);
-
-  // 페이지 번호 배열 생성
-  const getPageNumbers = () => {
-    const pages = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
-    } else {
-      if (currentPage <= 4) {
-        for (let i = 1; i <= 5; i++) {
-          pages.push(i);
-        }
-        pages.push('...');
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 3) {
-        pages.push(1);
-        pages.push('...');
-        for (let i = totalPages - 4; i <= totalPages; i++) {
-          pages.push(i);
-        }
-      } else {
-        pages.push(1);
-        pages.push('...');
-        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
-          pages.push(i);
-        }
-        pages.push('...');
-        pages.push(totalPages);
-      }
-    }
-    return pages;
+  // 본인이 속한 프로젝트인지 확인
+  const isMyProject = (project: ProjectWithRelations) => {
+    if (!member) return false;
+    return project.allocations?.some((alloc) => alloc.member_id === member.id) || false;
   };
+
+  // 진행중인 프로젝트 (planning, inprogress, paused)
+  const activeProjects = filteredProjects.filter((p) => p.status !== 'completed');
+  // 완료된 프로젝트
+  const completedProjects = filteredProjects.filter((p) => p.status === 'completed');
+
+  // 진행중 프로젝트 중 내가 속한 프로젝트
+  const myActiveProjects = activeProjects.filter((p) => isMyProject(p));
+  // 진행중 프로젝트 중 내가 속하지 않은 프로젝트
+  const otherActiveProjects = activeProjects.filter((p) => !isMyProject(p));
 
   if (isLoading) {
     return (
@@ -196,15 +180,17 @@ export default function ProjectsPage() {
         <p className="text-sm text-gray-600">참여 프로젝트 목록입니다.</p>
       </div>
 
-      {/* 추가하기 버튼 */}
-      <div className="mb-6">
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
-        >
-          + 프로젝트 추가하기
-        </button>
-      </div>
+      {/* 추가하기 버튼 - 관리자/팀관리자만 표시 */}
+      {canManageProject && (
+        <div className="mb-6">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+          >
+            + 프로젝트 추가하기
+          </button>
+        </div>
+      )}
 
       {/* 검색바 */}
       <div className="flex justify-end mb-6">
@@ -223,163 +209,80 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* 테이블 */}
-      <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-12"></th>
-              <th className="px-4 py-3 text-left font-medium text-gray-700">프로젝트명</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">현황</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">유형</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-64">계약기간</th>
-              <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">계약금</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-48">실행률</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-20">관리</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {currentProjects.map((project) => {
-              const category = project.category || projectCategories.find((c) => c.id === project.category_id);
-              const executionRate = calculateExecutionRate(project.start_date, project.end_date);
-              const isStarred = starredProjects[project.id];
-
-              return (
-                <tr key={project.id} className="hover:bg-gray-50">
-                  {/* 즐겨찾기 */}
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => handleToggleStar(project.id)}
-                      className="text-gray-400 hover:text-yellow-500 transition-colors"
-                    >
-                      <Star
-                        className={`w-5 h-5 ${
-                          isStarred ? 'fill-yellow-400 text-yellow-400' : ''
-                        }`}
-                      />
-                    </button>
-                  </td>
-
-                  {/* 프로젝트명 */}
-                  <td className="px-4 py-3 text-gray-900">{project.name}</td>
-
-                  {/* 현황 */}
-                  <td className="px-4 py-3 text-center">
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                        project.status
-                      )}`}
-                    >
-                      {getStatusLabel(project.status)}
-                    </span>
-                  </td>
-
-                  {/* 유형 */}
-                  <td className="px-4 py-3 text-center text-gray-700">
-                    {category?.name || '-'}
-                  </td>
-
-                  {/* 계약기간 */}
-                  <td className="px-4 py-3 text-center text-gray-700">
-                    {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
-                    {format(new Date(project.end_date), 'yyyy/MM/dd')}
-                  </td>
-
-                  {/* 계약금 */}
-                  <td className="px-4 py-3 text-right text-gray-700">
-                    {project.contract_amount > 0
-                      ? `${project.contract_amount.toLocaleString()}원`
-                      : '0원'}
-                  </td>
-
-                  {/* 실행률 */}
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1 bg-gray-200 rounded-full h-2">
-                        <div
-                          className={`h-2 rounded-full transition-all ${
-                            executionRate > 100 ? 'bg-red-500' : 'bg-blue-500'
-                          }`}
-                          style={{
-                            width: `${Math.min(executionRate, 100)}%`,
-                          }}
-                        />
-                      </div>
-                      <span
-                        className={`text-sm font-medium w-12 text-right ${
-                          executionRate > 100 ? 'text-red-600' : 'text-gray-700'
-                        }`}
-                      >
-                        {executionRate}%
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* 관리 */}
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => handleEditProject(project)}
-                      className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="수정"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {currentProjects.length === 0 && (
-          <div className="text-center py-8 text-gray-500">
-            프로젝트가 없습니다.
+      {/* 내가 참여중인 프로젝트 */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+          내가 참여중인 프로젝트
+          <span className="text-sm font-normal text-gray-500">({myActiveProjects.length})</span>
+        </h2>
+        {myActiveProjects.length > 0 ? (
+          <ProjectTable
+            projects={myActiveProjects}
+            projectCategories={projectCategories}
+            starredProjects={starredProjects}
+            canManageProject={canManageProject}
+            onToggleStar={handleToggleStar}
+            onEditProject={handleEditProject}
+            calculateExecutionRate={calculateExecutionRate}
+            getStatusLabel={getStatusLabel}
+            getStatusColor={getStatusColor}
+          />
+        ) : (
+          <div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">
+            참여중인 프로젝트가 없습니다.
           </div>
         )}
       </div>
 
-      {/* 페이지네이션 */}
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-2 mt-6">
-          <button
-            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            &lt;
-          </button>
+      {/* 기타 진행중인 프로젝트 */}
+      {otherActiveProjects.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <span className="w-2 h-2 bg-gray-400 rounded-full"></span>
+            기타 진행중인 프로젝트
+            <span className="text-sm font-normal text-gray-500">({otherActiveProjects.length})</span>
+          </h2>
+          <ProjectTable
+            projects={otherActiveProjects}
+            projectCategories={projectCategories}
+            starredProjects={starredProjects}
+            canManageProject={canManageProject}
+            onToggleStar={handleToggleStar}
+            onEditProject={handleEditProject}
+            calculateExecutionRate={calculateExecutionRate}
+            getStatusLabel={getStatusLabel}
+            getStatusColor={getStatusColor}
+          />
+        </div>
+      )}
 
-          {getPageNumbers().map((page, index) => {
-            if (page === '...') {
-              return (
-                <span key={`ellipsis-${index}`} className="px-3 py-1 text-gray-500">
-                  ...
-                </span>
-              );
-            }
+      {/* 완료된 프로젝트 */}
+      {completedProjects.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+            완료된 프로젝트
+            <span className="text-sm font-normal text-gray-500">({completedProjects.length})</span>
+          </h2>
+          <ProjectTable
+            projects={completedProjects}
+            projectCategories={projectCategories}
+            starredProjects={starredProjects}
+            canManageProject={canManageProject}
+            onToggleStar={handleToggleStar}
+            onEditProject={handleEditProject}
+            calculateExecutionRate={calculateExecutionRate}
+            getStatusLabel={getStatusLabel}
+            getStatusColor={getStatusColor}
+          />
+        </div>
+      )}
 
-            return (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page as number)}
-                className={`px-3 py-1 rounded transition-colors ${
-                  currentPage === page
-                    ? 'bg-blue-600 text-white'
-                    : 'hover:bg-gray-100 text-gray-700'
-                }`}
-              >
-                {page}
-              </button>
-            );
-          })}
-
-          <button
-            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-            disabled={currentPage === totalPages}
-            className="px-3 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            &gt;
-          </button>
+      {/* 프로젝트가 없을 때 */}
+      {filteredProjects.length === 0 && (
+        <div className="bg-white rounded-lg shadow-sm p-8 text-center text-gray-500">
+          프로젝트가 없습니다.
         </div>
       )}
 
@@ -417,6 +320,143 @@ export default function ProjectsPage() {
   );
 }
 
+// 프로젝트 테이블 컴포넌트
+function ProjectTable({
+  projects,
+  projectCategories,
+  starredProjects,
+  canManageProject,
+  onToggleStar,
+  onEditProject,
+  calculateExecutionRate,
+  getStatusLabel,
+  getStatusColor,
+}: {
+  projects: ProjectWithRelations[];
+  projectCategories: ProjectCategory[];
+  starredProjects: Record<string, boolean>;
+  canManageProject: boolean;
+  onToggleStar: (projectId: string) => void;
+  onEditProject: (project: ProjectWithRelations) => void;
+  calculateExecutionRate: (startDate: string, endDate: string, status: string) => number;
+  getStatusLabel: (status: string) => string;
+  getStatusColor: (status: string) => string;
+}) {
+  return (
+    <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th className="px-4 py-3 text-center font-medium text-gray-700 w-12"></th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">프로젝트명</th>
+            <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">현황</th>
+            <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">유형</th>
+            <th className="px-4 py-3 text-center font-medium text-gray-700 w-64">계약기간</th>
+            <th className="px-4 py-3 text-right font-medium text-gray-700 w-32">계약금</th>
+            <th className="px-4 py-3 text-center font-medium text-gray-700 w-48">실행률</th>
+            {canManageProject && (
+              <th className="px-4 py-3 text-center font-medium text-gray-700 w-20">관리</th>
+            )}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200">
+          {projects.map((project) => {
+            const category = project.category || projectCategories.find((c) => c.id === project.category_id);
+            const executionRate = calculateExecutionRate(project.start_date, project.end_date, project.status);
+            const isStarred = starredProjects[project.id];
+
+            return (
+              <tr key={project.id} className="hover:bg-gray-50">
+                {/* 즐겨찾기 */}
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={() => onToggleStar(project.id)}
+                    className="text-gray-400 hover:text-yellow-500 transition-colors"
+                  >
+                    <Star
+                      className={`w-5 h-5 ${
+                        isStarred ? 'fill-yellow-400 text-yellow-400' : ''
+                      }`}
+                    />
+                  </button>
+                </td>
+
+                {/* 프로젝트명 */}
+                <td className="px-4 py-3 text-gray-900">{project.name}</td>
+
+                {/* 현황 */}
+                <td className="px-4 py-3 text-center">
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                      project.status
+                    )}`}
+                  >
+                    {getStatusLabel(project.status)}
+                  </span>
+                </td>
+
+                {/* 유형 */}
+                <td className="px-4 py-3 text-center text-gray-700">
+                  {category?.name || '-'}
+                </td>
+
+                {/* 계약기간 */}
+                <td className="px-4 py-3 text-center text-gray-700">
+                  {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
+                  {format(new Date(project.end_date), 'yyyy/MM/dd')}
+                </td>
+
+                {/* 계약금 */}
+                <td className="px-4 py-3 text-right text-gray-700">
+                  {project.contract_amount > 0
+                    ? `${project.contract_amount.toLocaleString()}원`
+                    : '0원'}
+                </td>
+
+                {/* 실행률 */}
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 bg-gray-200 rounded-full h-2">
+                      <div
+                        className={`h-2 rounded-full transition-all ${
+                          executionRate > 100 ? 'bg-red-500' : 'bg-blue-500'
+                        }`}
+                        style={{
+                          width: `${Math.min(executionRate, 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <span
+                      className={`text-sm font-medium w-12 text-right ${
+                        executionRate > 100 ? 'text-red-600' : 'text-gray-700'
+                      }`}
+                    >
+                      {executionRate}%
+                    </span>
+                  </div>
+                </td>
+
+                {/* 관리 - 관리자/팀관리자만 표시 */}
+                {canManageProject && (
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={() => onEditProject(project)}
+                      className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="수정"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // 프로젝트 추가/수정 모달 컴포넌트
 function ProjectFormModal({
   isOpen,
@@ -435,6 +475,7 @@ function ProjectFormModal({
   project?: Project | null;
   onSave: (project: Project) => void;
 }) {
+  const { member: authMember } = useAuthStore();
   const isEditMode = !!project;
   const [isSaving, setIsSaving] = useState(false);
 
@@ -446,9 +487,6 @@ function ProjectFormModal({
   const [contractEndDate, setContractEndDate] = useState(project?.end_date || '');
   const [projectStartDate, setProjectStartDate] = useState(project?.start_date || '');
   const [projectEndDate, setProjectEndDate] = useState(project?.end_date || '');
-  const [downPaymentPercent, setDownPaymentPercent] = useState('50');
-  const [midPaymentPercent, setMidPaymentPercent] = useState('');
-  const [finalPaymentPercent, setFinalPaymentPercent] = useState('50');
   const [contractAmount, setContractAmount] = useState(project?.contract_amount?.toString() || '');
 
   // 활성 팀원 목록
@@ -581,6 +619,9 @@ function ProjectFormModal({
   const [techFeeRate, setTechFeeRate] = useState('15');
   const [roundingMethod, setRoundingMethod] = useState('반올림');
   const [memo, setMemo] = useState(project?.memo || '');
+  const [companySharePercent, setCompanySharePercent] = useState(
+    (project as any)?.company_share_percent?.toString() || '80'
+  );
 
   // 1일 투입비용 상세 계산 함수
   const calculateDailyCostDetails = (memberId: string, startDate: string) => {
@@ -817,9 +858,9 @@ function ProjectFormModal({
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">선택</option>
-                <option value="비딩 / 선행">비딩 / 선행</option>
-                <option value="진행">진행</option>
-                <option value="완료">완료</option>
+                <option value="planning">비딩 / 선행</option>
+                <option value="inprogress">진행</option>
+                <option value="completed">완료</option>
               </select>
             </div>
 
@@ -877,41 +918,21 @@ function ProjectFormModal({
             </div>
           </div>
 
-          {/* 계약금액 입금 방식 */}
+          {/* 계약금 */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              계약금액 입금 방식
+              계약금
             </label>
-            <div className="grid grid-cols-3 gap-4">
-              <input
-                type="text"
-                value={`선금 ${downPaymentPercent}%`}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/[^0-9]/g, '');
-                  setDownPaymentPercent(val);
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <input
-                type="text"
-                value={midPaymentPercent ? `중도금 ${midPaymentPercent}%` : '중도금'}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/[^0-9]/g, '');
-                  setMidPaymentPercent(val);
-                }}
-                placeholder="중도금"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <input
-                type="text"
-                value={`완수금 ${finalPaymentPercent}%`}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/[^0-9]/g, '');
-                  setFinalPaymentPercent(val);
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <input
+              type="text"
+              value={contractAmount ? parseInt(contractAmount).toLocaleString() : ''}
+              onChange={(e) => {
+                const val = e.target.value.replace(/[^0-9]/g, '');
+                setContractAmount(val);
+              }}
+              placeholder="계약금을 입력하세요"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
 
           {/* 총 투입비용 */}
@@ -1235,6 +1256,70 @@ function ProjectFormModal({
             </div>
           </div>
 
+          {/* 성과 배분 비율 */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">성과 배분 비율</h3>
+            <div className="bg-green-50 p-4 rounded-lg mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-gray-700">회사</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={companySharePercent}
+                    onChange={(e) => {
+                      const val = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                      setCompanySharePercent(val.toString());
+                    }}
+                    className="w-20 px-2 py-1 text-xl font-bold text-gray-900 text-right border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-xl font-bold text-gray-900">%</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-700">팀원</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={100 - parseInt(companySharePercent || '0')}
+                    onChange={(e) => {
+                      const teamVal = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                      setCompanySharePercent((100 - teamVal).toString());
+                    }}
+                    className="w-20 px-2 py-1 text-xl font-bold text-green-600 text-right border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                  <span className="text-xl font-bold text-green-600">%</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                슬라이더로 조절
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={companySharePercent}
+                onChange={(e) => setCompanySharePercent(e.target.value)}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0% (팀원 100%)</span>
+                <span>50%</span>
+                <span>100% (회사 100%)</span>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mt-3">
+              프로젝트 완료 후 발생하는 성과를 회사와 팀원이 나누는 비율입니다.
+              팀원 배분은 각 멤버의 효율(절약률)에 따라 배분됩니다.
+            </p>
+          </div>
+
           {/* 비고 */}
           <div>
             <h3 className="text-lg font-semibold text-gray-900 mb-4">비고</h3>
@@ -1285,13 +1370,18 @@ function ProjectFormModal({
                   contract_amount: parseInt(contractAmount) || totalContractAmount,
                   memo: memo || null,
                   contact_name: projectPM || null,
+                  company_share_percent: parseInt(companySharePercent) || 80,
                 };
 
                 let result;
                 if (isEditMode && project) {
                   result = await updateProject(project.id, projectData);
                 } else {
-                  result = await createProject(projectData as any);
+                  // 새 프로젝트 생성 시 org_id 추가
+                  result = await createProject({
+                    ...projectData,
+                    org_id: authMember?.org_id || '',
+                  } as any);
                 }
 
                 // 팀원 배정 저장
@@ -1315,9 +1405,10 @@ function ProjectFormModal({
                 if (result) {
                   onSave(result);
                 }
-              } catch (error) {
+              } catch (error: any) {
                 console.error('프로젝트 저장 실패:', error);
-                alert('프로젝트 저장에 실패했습니다.');
+                console.error('에러 상세:', error?.message, error?.code, error?.details);
+                alert(`프로젝트 저장에 실패했습니다.\n${error?.message || ''}`);
               } finally {
                 setIsSaving(false);
               }

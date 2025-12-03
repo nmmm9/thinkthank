@@ -1,7 +1,6 @@
 // API 함수 모음
 export * from './members';
 export * from './teams';
-export * from './positions';
 export * from './projects';
 export * from './schedules';
 export * from './receipts';
