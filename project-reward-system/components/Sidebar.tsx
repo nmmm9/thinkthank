@@ -60,8 +60,8 @@ const Sidebar = () => {
     { href: '/settings/misc', label: '기타설정', icon: MoreHorizontal },
   ];
 
-  // 관리자 여부 확인
-  const isAdmin = member?.role === 'admin';
+  // 관리자 여부 확인 (admin 또는 manager 모두 설정 메뉴 접근 가능)
+  const isAdmin = member?.role === 'admin' || member?.role === 'manager';
 
   const isActive = (href: string) => {
     if (href === '/') {
@@ -70,9 +70,8 @@ const Sidebar = () => {
     return pathname.includes(href);
   };
 
-  // member에서 팀/직급 정보 가져오기
+  // member에서 팀 정보 가져오기
   const userTeam = member?.team;
-  const userPosition = member?.position;
 
   return (
     <aside
@@ -116,7 +115,7 @@ const Sidebar = () => {
               {member.organization?.name || 'CO.UP'}
             </p>
             <p className="text-xs text-gray-500">
-              {userTeam?.name || '팀 미지정'} | {userPosition?.name || '직급 미지정'}
+              {userTeam?.name || '팀 미지정'}
             </p>
           </div>
         </div>

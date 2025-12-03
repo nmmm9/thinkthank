@@ -4,8 +4,6 @@ export * from './teams';
 export * from './projects';
 export * from './schedules';
 export * from './receipts';
-export * from './expenses';
 export * from './opex';
-export * from './holidays';
 export * from './settings';
 export * from './project-categories';

@@ -33,7 +33,7 @@ export default function WorkTimePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const settingData = await getWorkTimeSetting();
+        const settingData = await getWorkTimeSetting() as WorkTimeSetting | null;
         setWorkTimeSetting(settingData);
         if (settingData) {
           setWorkMinutes(settingData.work_minutes_per_day);

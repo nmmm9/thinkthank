@@ -107,47 +107,6 @@ export default function LoginPage() {
               회원가입
             </button>
           </div>
-
-          {/* 신규 입사자 로그인 */}
-          <div className="mt-6">
-            <button
-              className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              신규 입사자 (사원급) 로그인
-            </button>
-          </div>
-
-          {/* 개발용 빠른 로그인 - 실제 DB 사용 시 제거 가능 */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 mb-3 text-center">빠른 로그인 (개발용)</p>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                className="px-3 py-2 text-xs bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors"
-              >
-                CEO
-              </button>
-              <button
-                className="px-3 py-2 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
-              >
-                팀장
-              </button>
-              <button
-                className="px-3 py-2 text-xs bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
-              >
-                일반사원
-              </button>
-            </div>
-          </div>
-
-          {/* 계정 안내 */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-600 mb-2 font-medium">테스트 계정:</p>
-            <div className="space-y-1 text-xs text-gray-600">
-              <div>• CEO: admin@rewarding.com</div>
-              <div>• 팀장: ooo.think.jh@gmail.com</div>
-              <div>• 일반사원: ooo.think.lhj@gmail.com</div>
-            </div>
-          </div>
         </div>
 
         <p className="text-center text-xs text-gray-500 mt-6">

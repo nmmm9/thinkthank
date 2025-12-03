@@ -5,13 +5,17 @@ import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import Modal from '@/components/Modal';
 import { SaveButton, DeleteButton } from '@/components/ActionButtons';
-import { getProjects, getReceipts, getProjectCategories, getMembers, getOpexList, getSchedules } from '@/lib/api';
+import { getProjects, getReceipts, getProjectCategories, getMembers, getOpexList, getSchedules, settleProject, unsettleProject } from '@/lib/api';
 import type { Project, Receipt, ProjectCategory, Schedule, Opex, MemberWithRelations } from '@/lib/supabase/database.types';
 import { format, differenceInDays } from 'date-fns';
-import { Star } from 'lucide-react';
+import { Star, Check } from 'lucide-react';
 import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
+import { useAuthStore } from '@/lib/auth-store';
 
 export default function SettlementPage() {
+  const { member: currentUser } = useAuthStore();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'manager';
+
   const [selectedYear, setSelectedYear] = useState('2025');
   const [selectedStatus, setSelectedStatus] = useState('진행상태 - 전체');
   const [selectedCategory, setSelectedCategory] = useState('구분 - 전체');
@@ -198,6 +202,28 @@ export default function SettlementPage() {
     };
   };
 
+  // 정산 완료/취소 핸들러
+  const handleSettleToggle = async (projectId: string, isSettled: boolean) => {
+    try {
+      if (isSettled) {
+        if (!confirm('정산 완료를 취소하시겠습니까?')) return;
+        await unsettleProject(projectId);
+      } else {
+        if (!confirm('정산 완료 처리하시겠습니까?\n\n정산 완료된 프로젝트는 성과 페이지에 반영됩니다.')) return;
+        await settleProject(projectId);
+      }
+
+      // 프로젝트 목록 업데이트
+      setProjects(projects.map(p =>
+        p.id === projectId
+          ? { ...p, is_settled: !isSettled, settled_at: !isSettled ? new Date().toISOString() : null }
+          : p
+      ));
+    } catch (error) {
+      console.error('정산 처리 실패:', error);
+      alert('정산 처리에 실패했습니다.');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -267,6 +293,11 @@ export default function SettlementPage() {
               <th className="px-4 py-3 text-right font-medium text-gray-700 w-36">
                 영업이익 (%)
               </th>
+              {isAdmin && (
+                <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">
+                  정산
+                </th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -341,6 +372,29 @@ export default function SettlementPage() {
                       </span>
                     </div>
                   </td>
+
+                  {/* 정산완료 버튼 - 관리자만 표시 */}
+                  {isAdmin && (
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => handleSettleToggle(project.id, project.is_settled)}
+                        className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                          project.is_settled
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        {project.is_settled ? (
+                          <span className="flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            완료
+                          </span>
+                        ) : (
+                          '정산'
+                        )}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule } from '@/lib/api';
+import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import type { Project, Schedule } from '@/lib/supabase/database.types';
 import {
@@ -16,7 +16,7 @@ import {
   differenceInDays,
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette } from 'lucide-react';
 
 // 타임라인 설정
 const HOUR_HEIGHT = 60; // 1시간 = 60px
@@ -51,12 +51,28 @@ export default function SchedulesPage() {
   const [dragScheduleId, setDragScheduleId] = useState<string | null>(null);
   const [dragType, setDragType] = useState<'move' | 'resize-top' | 'resize-bottom' | null>(null);
 
+  // 드래그 프리뷰 상태 (React로 관리)
+  const [dragPreview, setDragPreview] = useState<{
+    top: number;
+    height: number;
+    left: number;
+    width: number;
+    date: string;
+    startTime: string;
+    endTime: string;
+  } | null>(null);
+
   // ref로 관리하여 리렌더링 방지
   const dragRef = useRef({
     startY: 0,
+    startX: 0,
     originalStart: '',
     originalEnd: '',
+    originalDate: '',
     hasDragged: false,
+    currentStart: '',
+    currentEnd: '',
+    currentDate: '',
   });
 
   // 새 스케줄 생성용 드래그 상태
@@ -79,10 +95,10 @@ export default function SchedulesPage() {
           getProjects(),
           getSchedules(),
         ]);
-        setProjects(projectsData);
-        setSchedules(schedulesData);
+        setProjects(projectsData as Project[]);
+        setSchedules(schedulesData as Schedule[]);
         setVisibleProjects(
-          projectsData.reduce((acc, p) => ({ ...acc, [p.id]: true }), {})
+          (projectsData as Project[]).reduce((acc, p) => ({ ...acc, [p.id]: true }), {})
         );
       } catch (error) {
         console.error('Failed to load data:', error);
@@ -112,18 +128,57 @@ export default function SchedulesPage() {
 
   // 프로젝트 색상 배정 (더 선명한 색상)
   const projectColors = [
-    { bg: 'bg-blue-500', hover: 'hover:bg-blue-600', text: 'text-white', light: 'bg-blue-100' },
-    { bg: 'bg-green-500', hover: 'hover:bg-green-600', text: 'text-white', light: 'bg-green-100' },
-    { bg: 'bg-purple-500', hover: 'hover:bg-purple-600', text: 'text-white', light: 'bg-purple-100' },
-    { bg: 'bg-orange-500', hover: 'hover:bg-orange-600', text: 'text-white', light: 'bg-orange-100' },
-    { bg: 'bg-pink-500', hover: 'hover:bg-pink-600', text: 'text-white', light: 'bg-pink-100' },
-    { bg: 'bg-teal-500', hover: 'hover:bg-teal-600', text: 'text-white', light: 'bg-teal-100' },
-    { bg: 'bg-indigo-500', hover: 'hover:bg-indigo-600', text: 'text-white', light: 'bg-indigo-100' },
+    { key: 'blue', bg: 'bg-blue-500', hover: 'hover:bg-blue-600', text: 'text-white', light: 'bg-blue-100', hex: '#3b82f6' },
+    { key: 'green', bg: 'bg-green-500', hover: 'hover:bg-green-600', text: 'text-white', light: 'bg-green-100', hex: '#22c55e' },
+    { key: 'purple', bg: 'bg-purple-500', hover: 'hover:bg-purple-600', text: 'text-white', light: 'bg-purple-100', hex: '#a855f7' },
+    { key: 'orange', bg: 'bg-orange-500', hover: 'hover:bg-orange-600', text: 'text-white', light: 'bg-orange-100', hex: '#f97316' },
+    { key: 'pink', bg: 'bg-pink-500', hover: 'hover:bg-pink-600', text: 'text-white', light: 'bg-pink-100', hex: '#ec4899' },
+    { key: 'teal', bg: 'bg-teal-500', hover: 'hover:bg-teal-600', text: 'text-white', light: 'bg-teal-100', hex: '#14b8a6' },
+    { key: 'indigo', bg: 'bg-indigo-500', hover: 'hover:bg-indigo-600', text: 'text-white', light: 'bg-indigo-100', hex: '#6366f1' },
+    { key: 'red', bg: 'bg-red-500', hover: 'hover:bg-red-600', text: 'text-white', light: 'bg-red-100', hex: '#ef4444' },
+    { key: 'yellow', bg: 'bg-yellow-500', hover: 'hover:bg-yellow-600', text: 'text-white', light: 'bg-yellow-100', hex: '#eab308' },
+    { key: 'cyan', bg: 'bg-cyan-500', hover: 'hover:bg-cyan-600', text: 'text-white', light: 'bg-cyan-100', hex: '#06b6d4' },
   ];
 
+  // 색상 선택 팝오버 상태
+  const [colorPickerProjectId, setColorPickerProjectId] = useState<string | null>(null);
+
+  // 색상 팔레트 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (colorPickerProjectId && !(e.target as HTMLElement).closest('[data-color-picker]')) {
+        setColorPickerProjectId(null);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [colorPickerProjectId]);
+
   const getProjectColor = (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    // 저장된 색상이 있으면 사용
+    if (project?.color) {
+      const savedColor = projectColors.find((c) => c.key === project.color);
+      if (savedColor) return savedColor;
+    }
+    // 없으면 인덱스 기반 기본 색상
     const index = projects.findIndex((p) => p.id === projectId);
     return projectColors[index % projectColors.length];
+  };
+
+  // 프로젝트 색상 변경
+  const handleColorChange = async (projectId: string, colorKey: string) => {
+    try {
+      await updateProject(projectId, { color: colorKey });
+      // 로컬 상태 업데이트
+      setProjects((prev) =>
+        prev.map((p) => (p.id === projectId ? { ...p, color: colorKey } : p))
+      );
+      setColorPickerProjectId(null);
+    } catch (error) {
+      console.error('색상 변경 실패:', error);
+      alert('색상 변경에 실패했습니다.');
+    }
   };
 
   const activeProjects = useMemo(() => {
@@ -474,48 +529,80 @@ export default function SchedulesPage() {
 
   // 겹치는 스케줄 처리
   const getOverlappingSchedules = (daySchedules: Schedule[]) => {
-    const positioned: Array<{ schedule: Schedule; column: number; totalColumns: number }> = [];
+    if (daySchedules.length === 0) return [];
+
+    // 각 스케줄의 시작/끝 위치 미리 계산
+    const scheduleData = daySchedules.map((schedule) => {
+      const pos = getSchedulePosition(schedule);
+      return {
+        schedule,
+        top: pos.top,
+        bottom: pos.top + pos.height,
+        column: 0,
+        totalColumns: 1,
+      };
+    });
 
     // 시작 시간 순으로 정렬
-    const sorted = [...daySchedules].sort((a, b) => {
-      const aStart = timeToMinutes((a as any).start_time || '00:00');
-      const bStart = timeToMinutes((b as any).start_time || '00:00');
-      return aStart - bStart;
-    });
+    scheduleData.sort((a, b) => a.top - b.top);
 
-    sorted.forEach((schedule) => {
-      const pos = getSchedulePosition(schedule);
-      const scheduleEnd = pos.top + pos.height;
-
-      // 겹치는 스케줄 찾기
-      const overlapping = positioned.filter((p) => {
-        const pPos = getSchedulePosition(p.schedule);
-        const pEnd = pPos.top + pPos.height;
-        return !(pos.top >= pEnd || scheduleEnd <= pPos.top);
-      });
+    // 1단계: 각 스케줄의 컬럼 배치
+    scheduleData.forEach((current, index) => {
+      // 현재 스케줄과 겹치는 이전 스케줄들 찾기
+      const overlapping = scheduleData.slice(0, index).filter(
+        (other) => !(current.top >= other.bottom || current.bottom <= other.top)
+      );
 
       // 사용 가능한 컬럼 찾기
-      const usedColumns = overlapping.map((o) => o.column);
+      const usedColumns = new Set(overlapping.map((o) => o.column));
       let column = 0;
-      while (usedColumns.includes(column)) {
+      while (usedColumns.has(column)) {
         column++;
       }
-
-      positioned.push({ schedule, column, totalColumns: 1 });
-
-      // 겹치는 모든 스케줄의 totalColumns 업데이트
-      const allOverlapping = positioned.filter((p) => {
-        const pPos = getSchedulePosition(p.schedule);
-        const pEnd = pPos.top + pPos.height;
-        return !(pos.top >= pEnd || scheduleEnd <= pPos.top);
-      });
-      const maxColumn = Math.max(...allOverlapping.map((o) => o.column)) + 1;
-      allOverlapping.forEach((o) => {
-        o.totalColumns = maxColumn;
-      });
+      current.column = column;
     });
 
-    return positioned;
+    // 2단계: 겹치는 그룹별로 totalColumns 계산
+    // 겹치는 스케줄들을 그룹으로 묶기
+    const visited = new Set<number>();
+
+    const findOverlapGroup = (startIdx: number): number[] => {
+      const group: number[] = [];
+      const queue = [startIdx];
+
+      while (queue.length > 0) {
+        const idx = queue.shift()!;
+        if (visited.has(idx)) continue;
+        visited.add(idx);
+        group.push(idx);
+
+        const current = scheduleData[idx];
+        scheduleData.forEach((other, otherIdx) => {
+          if (!visited.has(otherIdx) && !(current.top >= other.bottom || current.bottom <= other.top)) {
+            queue.push(otherIdx);
+          }
+        });
+      }
+
+      return group;
+    };
+
+    // 각 그룹의 totalColumns 설정
+    for (let i = 0; i < scheduleData.length; i++) {
+      if (!visited.has(i)) {
+        const group = findOverlapGroup(i);
+        const maxColumn = Math.max(...group.map((idx) => scheduleData[idx].column)) + 1;
+        group.forEach((idx) => {
+          scheduleData[idx].totalColumns = maxColumn;
+        });
+      }
+    }
+
+    return scheduleData.map(({ schedule, column, totalColumns }) => ({
+      schedule,
+      column,
+      totalColumns,
+    }));
   };
 
   // 드래그 시작
@@ -526,11 +613,20 @@ export default function SchedulesPage() {
     const schedule = schedules.find((s) => s.id === scheduleId);
     if (!schedule) return;
 
+    const startTime = (schedule as any).start_time || '';
+    const endTime = (schedule as any).end_time || '';
+    const scheduleDate = schedule.date;
+
     dragRef.current = {
       startY: e.clientY,
-      originalStart: (schedule as any).start_time || '',
-      originalEnd: (schedule as any).end_time || '',
+      startX: e.clientX,
+      originalStart: startTime,
+      originalEnd: endTime,
+      originalDate: scheduleDate,
       hasDragged: false,
+      currentStart: startTime,
+      currentEnd: endTime,
+      currentDate: scheduleDate,
     };
 
     setIsDragging(true);
@@ -538,16 +634,27 @@ export default function SchedulesPage() {
     setDragType(type);
   };
 
-  // 드래그 중
+  // 드래그 중 - 상태 기반으로 프리뷰 관리
   useEffect(() => {
     if (!isDragging || !dragScheduleId || !dragType) return;
 
+    const dayColumns = document.querySelectorAll('[data-day-column]') as NodeListOf<HTMLElement>;
+    const TOP_PADDING = 8;
+
+    // 각 요일 컬럼의 위치 정보 캐시
+    const columnRects = Array.from(dayColumns).map((col) => ({
+      element: col,
+      date: col.dataset.dayColumn || '',
+      rect: col.getBoundingClientRect(),
+    }));
+
     const handleMouseMove = (e: MouseEvent) => {
-      const { startY, originalStart, originalEnd } = dragRef.current;
+      const { startY, startX, originalStart, originalEnd, originalDate } = dragRef.current;
       const deltaY = e.clientY - startY;
+      const deltaX = e.clientX - startX;
 
       // 5px 이상 움직여야 드래그로 인식
-      if (Math.abs(deltaY) > 5) {
+      if (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5) {
         dragRef.current.hasDragged = true;
       }
 
@@ -558,10 +665,19 @@ export default function SchedulesPage() {
 
       let newStartMinutes = originalStartMinutes;
       let newEndMinutes = originalEndMinutes;
+      let targetDate = originalDate;
 
       if (dragType === 'move') {
         newStartMinutes = originalStartMinutes + deltaMinutes;
         newEndMinutes = originalEndMinutes + deltaMinutes;
+
+        // 마우스 위치로 날짜 결정
+        const targetColumn = columnRects.find(
+          (col) => e.clientX >= col.rect.left && e.clientX <= col.rect.right
+        );
+        if (targetColumn) {
+          targetDate = targetColumn.date;
+        }
       } else if (dragType === 'resize-top') {
         newStartMinutes = originalStartMinutes + deltaMinutes;
         if (newStartMinutes >= newEndMinutes - 15) {
@@ -578,39 +694,66 @@ export default function SchedulesPage() {
       newStartMinutes = Math.max(START_HOUR * 60, Math.min(END_HOUR * 60 - 15, newStartMinutes));
       newEndMinutes = Math.max(START_HOUR * 60 + 15, Math.min(END_HOUR * 60, newEndMinutes));
 
-      // 로컬 상태 업데이트
-      setSchedules((prev) =>
-        prev.map((s) =>
-          s.id === dragScheduleId
-            ? {
-                ...s,
-                start_time: minutesToTime(newStartMinutes),
-                end_time: minutesToTime(newEndMinutes),
-                minutes: newEndMinutes - newStartMinutes,
-              } as any
-            : s
-        )
-      );
+      // ref에 현재 값 저장 (마우스업 시 사용)
+      dragRef.current.currentStart = minutesToTime(newStartMinutes);
+      dragRef.current.currentEnd = minutesToTime(newEndMinutes);
+      dragRef.current.currentDate = targetDate;
+
+      // 프리뷰 위치 계산
+      const targetColumn = columnRects.find((col) => col.date === targetDate);
+      if (targetColumn) {
+        const newTop = targetColumn.rect.top + TOP_PADDING + (newStartMinutes / 60 - START_HOUR) * HOUR_HEIGHT;
+        const newHeight = Math.max(30, (newEndMinutes - newStartMinutes) / 60 * HOUR_HEIGHT);
+
+        setDragPreview({
+          top: newTop,
+          height: newHeight,
+          left: targetColumn.rect.left + 2,
+          width: targetColumn.rect.width - 4,
+          date: targetDate,
+          startTime: dragRef.current.currentStart,
+          endTime: dragRef.current.currentEnd,
+        });
+      }
     };
 
     const handleMouseUp = async () => {
-      const { hasDragged } = dragRef.current;
+      const { hasDragged, currentStart, currentEnd, currentDate } = dragRef.current;
+
+      // 프리뷰 제거
+      setDragPreview(null);
 
       if (hasDragged) {
-        const schedule = schedules.find((s) => s.id === dragScheduleId);
-        if (schedule) {
-          try {
-            await updateSchedule(dragScheduleId, {
-              minutes: schedule.minutes,
-              start_time: (schedule as any).start_time,
-              end_time: (schedule as any).end_time,
-            });
-          } catch (error) {
-            console.error('스케줄 업데이트 실패:', error);
-            // 실패 시 원래 값으로 복원
-            const schedulesData = await getSchedules();
-            setSchedules(schedulesData);
-          }
+        const newMinutes = timeToMinutes(currentEnd) - timeToMinutes(currentStart);
+
+        // 상태 업데이트 (한 번만)
+        setSchedules((prev) =>
+          prev.map((s) =>
+            s.id === dragScheduleId
+              ? {
+                  ...s,
+                  date: currentDate,
+                  start_time: currentStart,
+                  end_time: currentEnd,
+                  minutes: newMinutes,
+                } as any
+              : s
+          )
+        );
+
+        // DB 업데이트
+        try {
+          await updateSchedule(dragScheduleId, {
+            date: currentDate,
+            minutes: newMinutes,
+            start_time: currentStart,
+            end_time: currentEnd,
+          });
+        } catch (error) {
+          console.error('스케줄 업데이트 실패:', error);
+          // 실패 시 원래 값으로 복원
+          const schedulesData = await getSchedules();
+          setSchedules(schedulesData);
         }
       }
 
@@ -628,7 +771,7 @@ export default function SchedulesPage() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragScheduleId, dragType, schedules]);
+  }, [isDragging, dragScheduleId, dragType]);
 
   // 빈 공간 드래그로 새 스케줄 생성
   const handleCreateDragStart = (e: React.MouseEvent, day: Date, columnElement: HTMLDivElement) => {
@@ -845,21 +988,59 @@ export default function SchedulesPage() {
           <div className="space-y-1">
             {myActiveProjects.map((project) => {
               const color = getProjectColor(project.id);
+              const isColorPickerOpen = colorPickerProjectId === project.id;
               return (
-                <div
-                  key={project.id}
-                  className="flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer"
-                  onClick={() => toggleProjectVisibility(project.id)}
-                >
-                  <div className={`w-3 h-3 rounded ${color.bg}`} />
-                  <span className="flex-1 text-gray-900 truncate text-xs">{project.name}</span>
-                  <button className="flex-shrink-0">
-                    {visibleProjects[project.id] ? (
-                      <Eye className="w-3.5 h-3.5 text-gray-400" />
-                    ) : (
-                      <EyeOff className="w-3.5 h-3.5 text-gray-300" />
-                    )}
-                  </button>
+                <div key={project.id} className="relative">
+                  <div
+                    className="flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer"
+                  >
+                    {/* 색상 선택 버튼 */}
+                    <button
+                      data-color-picker
+                      className={`w-4 h-4 rounded-full ${color.bg} flex-shrink-0 hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 transition-all`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setColorPickerProjectId(isColorPickerOpen ? null : project.id);
+                      }}
+                      title="색상 변경"
+                    />
+                    <span
+                      className="flex-1 text-gray-900 truncate text-xs"
+                      onClick={() => toggleProjectVisibility(project.id)}
+                    >
+                      {project.name}
+                    </span>
+                    <button
+                      className="flex-shrink-0"
+                      onClick={() => toggleProjectVisibility(project.id)}
+                    >
+                      {visibleProjects[project.id] ? (
+                        <Eye className="w-3.5 h-3.5 text-gray-400" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-gray-300" />
+                      )}
+                    </button>
+                  </div>
+                  {/* 색상 팔레트 팝오버 */}
+                  {isColorPickerOpen && (
+                    <div
+                      data-color-picker
+                      className="absolute left-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 p-2 z-50"
+                    >
+                      <div className="grid grid-cols-5 gap-1">
+                        {projectColors.map((c) => (
+                          <button
+                            key={c.key}
+                            className={`w-6 h-6 rounded-full ${c.bg} hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 transition-all ${
+                              color.key === c.key ? 'ring-2 ring-offset-1 ring-gray-600' : ''
+                            }`}
+                            onClick={() => handleColorChange(project.id, c.key)}
+                            title={c.key}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1001,6 +1182,7 @@ export default function SchedulesPage() {
                   return (
                     <div
                       key={format(day, 'yyyy-MM-dd')}
+                      data-day-column={format(day, 'yyyy-MM-dd')}
                       className="flex-1 relative border-l border-gray-200"
                       onMouseDown={(e) => {
                         // 빈 공간에서만 드래그 시작 (스케줄 블록이 아닌 경우)
@@ -1057,13 +1239,15 @@ export default function SchedulesPage() {
                         const color = getProjectColor(schedule.project_id);
                         const width = 100 / totalColumns;
                         const left = column * width;
+                        const isBeingDragged = isDragging && dragScheduleId === schedule.id;
 
                         return (
                           <div
                             key={schedule.id}
                             data-schedule-block
-                            className={`absolute rounded-lg ${color.bg} ${color.text} shadow-sm cursor-pointer transition-all hover:shadow-md ${
-                              isDragging && dragScheduleId === schedule.id ? 'opacity-75 z-30' : 'z-10'
+                            data-schedule-id={schedule.id}
+                            className={`absolute rounded-lg ${color.bg} ${color.text} shadow-sm cursor-pointer hover:shadow-md z-10 ${
+                              isBeingDragged ? 'opacity-30' : ''
                             }`}
                             style={{
                               top: TOP_PADDING + pos.top,
@@ -1422,6 +1606,32 @@ export default function SchedulesPage() {
               >
                 저장
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 드래그 프리뷰 (fixed position으로 화면에 표시) */}
+      {dragPreview && dragScheduleId && (
+        <div
+          className="fixed rounded-lg shadow-lg z-50 pointer-events-none"
+          style={{
+            top: dragPreview.top,
+            left: dragPreview.left,
+            width: dragPreview.width,
+            height: dragPreview.height,
+            backgroundColor: getProjectColor(
+              schedules.find((s) => s.id === dragScheduleId)?.project_id || ''
+            ).hex || '#3b82f6',
+            opacity: 0.9,
+          }}
+        >
+          <div className="p-2 text-white h-full overflow-hidden">
+            <div className="text-sm font-semibold truncate">
+              {projects.find((p) => p.id === schedules.find((s) => s.id === dragScheduleId)?.project_id)?.name}
+            </div>
+            <div className="text-xs font-medium mt-1 opacity-90">
+              {dragPreview.startTime} - {dragPreview.endTime}
             </div>
           </div>
         </div>

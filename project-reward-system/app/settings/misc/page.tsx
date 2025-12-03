@@ -23,7 +23,7 @@ export default function MiscPage() {
         // 회사 정보는 member.organization에서 가져옴
         if (member?.organization) {
           setCompanyName(member.organization.name);
-          setLogoUrl(member.organization.logo || '');
+          setLogoUrl((member.organization as any).logo_url || '');
         }
       } catch (error) {
         console.error('Failed to load data:', error);

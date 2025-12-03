@@ -11,7 +11,8 @@ interface AdminGuardProps {
 export default function AdminGuard({ children }: AdminGuardProps) {
   const router = useRouter();
   const { member, isAuthenticated, isLoading } = useAuthStore();
-  const isAdmin = member?.role === 'admin';
+  // admin 또는 manager(팀관리자) 모두 접근 허용
+  const hasAccess = member?.role === 'admin' || member?.role === 'manager';
 
   useEffect(() => {
     // 로딩 중이면 대기
@@ -23,12 +24,12 @@ export default function AdminGuard({ children }: AdminGuardProps) {
       return;
     }
 
-    // 로그인했지만 admin이 아니면 대시보드로 리디렉션
-    if (!isAdmin) {
-      alert('총괄관리자만 접근할 수 있습니다.');
+    // 로그인했지만 권한이 없으면 대시보드로 리디렉션
+    if (!hasAccess) {
+      alert('관리자만 접근할 수 있습니다.');
       router.push('/');
     }
-  }, [isAuthenticated, isAdmin, isLoading, router]);
+  }, [isAuthenticated, hasAccess, isLoading, router]);
 
   // 로딩 중
   if (isLoading) {
@@ -39,8 +40,8 @@ export default function AdminGuard({ children }: AdminGuardProps) {
     );
   }
 
-  // admin이 아니면 아무것도 표시하지 않음
-  if (!isAuthenticated || !isAdmin) {
+  // 권한이 없으면 아무것도 표시하지 않음
+  if (!isAuthenticated || !hasAccess) {
     return null;
   }
 

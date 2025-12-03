@@ -169,6 +169,12 @@ function OpexCard({
   const [items, setItems] = useState<ExpenseItem[]>(opex.items || []);
   const [isSaving, setIsSaving] = useState(false);
 
+  // opex prop이 변경되면 items 상태를 업데이트
+  useEffect(() => {
+    setItems(opex.items || []);
+    setIsEditing(false);
+  }, [opex]);
+
   // 총합 계산
   const totalAmount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
 
@@ -204,15 +210,16 @@ function OpexCard({
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      console.log('Saving opex:', { id: opex.id, totalAmount, items });
       await updateOpex(opex.id, {
         amount: totalAmount,
         items: items as any,
       });
       setIsEditing(false);
       onUpdate();
-    } catch (error) {
-      console.error('저장 실패:', error);
-      alert('저장에 실패했습니다.');
+    } catch (error: any) {
+      console.error('저장 실패:', error?.message || error);
+      alert(`저장에 실패했습니다: ${error?.message || '알 수 없는 오류'}`);
     } finally {
       setIsSaving(false);
     }

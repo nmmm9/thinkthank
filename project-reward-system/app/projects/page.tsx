@@ -1028,7 +1028,7 @@ function ProjectFormModal({
                             <option value="">팀원 선택</option>
                             {activeMembers.map((m) => (
                               <option key={m.id} value={m.id}>
-                                {m.name} ({m.position?.name || '직급 없음'})
+                                {m.name} ({m.team?.name || '팀 없음'})
                               </option>
                             ))}
                           </select>
@@ -1373,24 +1373,24 @@ function ProjectFormModal({
                   company_share_percent: parseInt(companySharePercent) || 80,
                 };
 
-                let result;
+                let savedProject: Project;
                 if (isEditMode && project) {
-                  result = await updateProject(project.id, projectData);
+                  savedProject = await updateProject(project.id, projectData) as Project;
                 } else {
                   // 새 프로젝트 생성 시 org_id 추가
-                  result = await createProject({
+                  savedProject = await createProject({
                     ...projectData,
                     org_id: authMember?.org_id || '',
-                  } as any);
+                  } as any) as Project;
                 }
 
                 // 팀원 배정 저장
-                if (result && teamMembers.length > 0) {
+                if (savedProject && teamMembers.length > 0) {
                   const validMembers = teamMembers.filter((m) => m.memberId);
                   if (validMembers.length > 0) {
                     await setProjectAllocations(
-                      result.id,
-                      result.org_id,
+                      savedProject.id,
+                      savedProject.org_id,
                       validMembers.map((m) => ({
                         memberId: m.memberId,
                         allocatedAmount: m.cost,
@@ -1402,9 +1402,7 @@ function ProjectFormModal({
                   }
                 }
 
-                if (result) {
-                  onSave(result);
-                }
+                onSave(savedProject);
               } catch (error: any) {
                 console.error('프로젝트 저장 실패:', error);
                 console.error('에러 상세:', error?.message, error?.code, error?.details);

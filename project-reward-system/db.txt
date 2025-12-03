@@ -48,7 +48,6 @@ CREATE TABLE public.members (
   email text NOT NULL,
   login_id text,
   team_id uuid,
-  position_id uuid,
   role text DEFAULT 'user'::text CHECK (role = ANY (ARRAY['admin'::text, 'manager'::text, 'user'::text])),
   annual_salary integer DEFAULT 0,
   is_approved boolean DEFAULT false,
@@ -59,8 +58,7 @@ CREATE TABLE public.members (
   CONSTRAINT members_pkey PRIMARY KEY (id),
   CONSTRAINT members_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
   CONSTRAINT members_auth_user_id_fkey FOREIGN KEY (auth_user_id) REFERENCES auth.users(id),
-  CONSTRAINT members_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id),
-  CONSTRAINT members_position_id_fkey FOREIGN KEY (position_id) REFERENCES public.positions(id)
+  CONSTRAINT members_team_id_fkey FOREIGN KEY (team_id) REFERENCES public.teams(id)
 );
 CREATE TABLE public.opex (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -85,18 +83,6 @@ CREATE TABLE public.organizations (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT organizations_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.positions (
-  id uuid NOT NULL DEFAULT uuid_generate_v4(),
-  org_id uuid NOT NULL,
-  name text NOT NULL,
-  level integer DEFAULT 0,
-  is_active boolean DEFAULT true,
-  sort_order integer DEFAULT 0,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT positions_pkey PRIMARY KEY (id),
-  CONSTRAINT positions_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
 );
 CREATE TABLE public.project_categories (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -146,6 +132,10 @@ CREATE TABLE public.projects (
   memo text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  company_share_percent integer DEFAULT 80,
+  is_settled boolean DEFAULT false,
+  settled_at timestamp with time zone,
+  color text,
   CONSTRAINT projects_pkey PRIMARY KEY (id),
   CONSTRAINT projects_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
   CONSTRAINT projects_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.project_categories(id),
@@ -175,6 +165,7 @@ CREATE TABLE public.schedules (
   updated_at timestamp with time zone DEFAULT now(),
   start_time text,
   end_time text,
+  description text,
   CONSTRAINT schedules_pkey PRIMARY KEY (id),
   CONSTRAINT schedules_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
   CONSTRAINT schedules_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),

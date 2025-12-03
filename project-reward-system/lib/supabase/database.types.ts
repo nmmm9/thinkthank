@@ -172,6 +172,9 @@ export interface Database {
           contact_phone: string | null
           memo: string | null
           company_share_percent: number
+          is_settled: boolean
+          settled_at: string | null
+          color: string | null
           created_at: string
           updated_at: string
         }
@@ -194,6 +197,9 @@ export interface Database {
           contact_phone?: string | null
           memo?: string | null
           company_share_percent?: number
+          is_settled?: boolean
+          settled_at?: string | null
+          color?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -216,6 +222,9 @@ export interface Database {
           contact_phone?: string | null
           memo?: string | null
           company_share_percent?: number
+          is_settled?: boolean
+          settled_at?: string | null
+          color?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -536,3 +545,12 @@ export type ScheduleInsert = Database['public']['Tables']['schedules']['Insert']
 export type ScheduleUpdate = Database['public']['Tables']['schedules']['Update']
 export type TeamInsert = Database['public']['Tables']['teams']['Insert']
 export type TeamUpdate = Database['public']['Tables']['teams']['Update']
+
+// 확장된 타입 (관계 포함)
+export interface MemberWithRelations extends Member {
+  team?: {
+    id: string;
+    name: string;
+  } | null;
+  organization?: Organization | null;
+}

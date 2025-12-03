@@ -29,33 +29,29 @@ export async function getActiveProjectCategories() {
 
 // 카테고리 생성
 export async function createProjectCategory(category: ProjectCategoryInsert) {
-  const { data, error } = await supabase
-    .from('project_categories')
-    .insert(category)
-    .select()
-    .single();
+  const { error } = await (supabase
+    .from('project_categories') as any)
+    .insert(category);
 
   if (error) throw error;
-  return data;
+  return category;
 }
 
 // 카테고리 수정
 export async function updateProjectCategory(id: string, updates: ProjectCategoryUpdate) {
-  const { data, error } = await supabase
-    .from('project_categories')
+  const { error } = await (supabase
+    .from('project_categories') as any)
     .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
+    .eq('id', id);
 
   if (error) throw error;
-  return data;
+  return { id, ...updates };
 }
 
 // 카테고리 삭제
 export async function deleteProjectCategory(id: string) {
-  const { error } = await supabase
-    .from('project_categories')
+  const { error } = await (supabase
+    .from('project_categories') as any)
     .delete()
     .eq('id', id);
 

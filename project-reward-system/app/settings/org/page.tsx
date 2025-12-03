@@ -2,14 +2,16 @@
 
 import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
-import { ToggleSwitch, SaveButton, DeleteButton, AddButton } from '@/components/ActionButtons';
+import { ToggleSwitch, DeleteButton, AddButton } from '@/components/ActionButtons';
 import {
   getTeams,
   createTeam,
   updateTeam,
   deleteTeam,
 } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
 import type { Team } from '@/lib/supabase/database.types';
+import { Save } from 'lucide-react';
 
 interface EditableTeam extends Team {
   editedName: string;
@@ -18,19 +20,33 @@ interface EditableTeam extends Team {
 }
 
 export default function OrgPage() {
+  const { member } = useAuthStore();
+  const isFullAdmin = member?.role === 'admin'; // 총괄관리자만 수정 가능
+
   const [teams, setTeams] = useState<EditableTeam[]>([]);
+  const [originalTeams, setOriginalTeams] = useState<EditableTeam[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [savingTeamId, setSavingTeamId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // 변경사항 확인
+  const hasChanges = teams.some(team => {
+    if (team.isNew) return true;
+    const original = originalTeams.find(t => t.id === team.id);
+    if (!original) return false;
+    return team.editedName !== original.name || team.editedIsActive !== original.is_active;
+  });
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const teamsData = await getTeams();
-        setTeams(teamsData.map(t => ({
+        const teamsData = await getTeams() as Team[];
+        const editableTeams = teamsData.map(t => ({
           ...t,
           editedName: t.name,
           editedIsActive: t.is_active
-        })));
+        }));
+        setTeams(editableTeams);
+        setOriginalTeams(editableTeams);
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -40,14 +56,32 @@ export default function OrgPage() {
     loadData();
   }, []);
 
+  // 페이지 이탈 경고 (브라우저 새로고침/닫기) - 총괄관리자만
+  useEffect(() => {
+    if (!isFullAdmin) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasChanges, isFullAdmin]);
+
   // 팀 추가
   const handleAddTeam = () => {
+    if (!isFullAdmin) return;
     const newTeam: EditableTeam = {
       id: `new-${Date.now()}`,
+      org_id: '',
       name: '',
       is_active: true,
       sort_order: teams.length,
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       editedName: '',
       editedIsActive: true,
       isNew: true
@@ -55,47 +89,100 @@ export default function OrgPage() {
     setTeams([...teams, newTeam]);
   };
 
-  // 팀 저장
-  const handleSaveTeam = async (team: EditableTeam) => {
-    if (!team.editedName.trim()) {
+  // 팀명 변경
+  const handleNameChange = (teamId: string, value: string) => {
+    if (!isFullAdmin) return;
+    setTeams(teams.map(t =>
+      t.id === teamId ? { ...t, editedName: value } : t
+    ));
+  };
+
+  // 활성 상태 변경
+  const handleActiveChange = (teamId: string, checked: boolean) => {
+    if (!isFullAdmin) return;
+    setTeams(teams.map(t =>
+      t.id === teamId ? { ...t, editedIsActive: checked } : t
+    ));
+  };
+
+  // 전체 저장
+  const handleSaveAll = async () => {
+    if (!isFullAdmin) return;
+
+    // 빈 이름 체크
+    const emptyTeam = teams.find(t => !t.editedName.trim());
+    if (emptyTeam) {
       alert('팀명을 입력해주세요.');
       return;
     }
 
-    setSavingTeamId(team.id);
+    setIsSaving(true);
     try {
-      if (team.isNew) {
-        const created = await createTeam({
-          name: team.editedName.trim(),
-          is_active: team.editedIsActive,
-          sort_order: team.sort_order
-        });
-        setTeams(teams.map(t =>
-          t.id === team.id
-            ? { ...created, editedName: created.name, editedIsActive: created.is_active }
-            : t
-        ));
-      } else {
-        const updated = await updateTeam(team.id, {
-          name: team.editedName.trim(),
-          is_active: team.editedIsActive
-        });
-        setTeams(teams.map(t =>
-          t.id === team.id
-            ? { ...updated, editedName: updated.name, editedIsActive: updated.is_active }
-            : t
-        ));
+      const savePromises: Promise<unknown>[] = [];
+
+      for (const team of teams) {
+        if (team.isNew) {
+          // 새 팀 생성
+          savePromises.push(
+            createTeam({
+              org_id: member?.org_id || '',
+              name: team.editedName.trim(),
+              is_active: team.editedIsActive,
+              sort_order: team.sort_order
+            })
+          );
+        } else {
+          // 기존 팀 수정 (변경된 경우만)
+          const original = originalTeams.find(t => t.id === team.id);
+          if (original && (team.editedName !== original.name || team.editedIsActive !== original.is_active)) {
+            savePromises.push(
+              updateTeam(team.id, {
+                name: team.editedName.trim(),
+                is_active: team.editedIsActive
+              })
+            );
+          }
+        }
       }
-    } catch (error) {
-      console.error('Failed to save team:', error);
-      alert('저장에 실패했습니다.');
+
+      const results = await Promise.allSettled(savePromises);
+
+      // 실패한 항목 확인
+      const failures = results.filter((r) => r.status === 'rejected');
+      if (failures.length > 0) {
+        console.error('저장 실패 항목:', failures);
+        const errorMessages = failures.map((f) => {
+          const reason = (f as PromiseRejectedResult).reason;
+          return reason?.message || reason?.toString() || '알 수 없는 오류';
+        });
+        alert(`저장에 실패했습니다:\n${errorMessages.join('\n')}`);
+        return;
+      }
+
+      // 데이터 새로고침
+      const teamsData = await getTeams() as Team[];
+      const editableTeams = teamsData.map(t => ({
+        ...t,
+        editedName: t.name,
+        editedIsActive: t.is_active
+      }));
+      setTeams(editableTeams);
+      setOriginalTeams(editableTeams);
+
+      alert('저장되었습니다.');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('Failed to save:', errorMessage, error);
+      alert(`저장에 실패했습니다: ${errorMessage}`);
     } finally {
-      setSavingTeamId(null);
+      setIsSaving(false);
     }
   };
 
   // 팀 삭제
   const handleDeleteTeam = async (team: EditableTeam) => {
+    if (!isFullAdmin) return;
+
     if (team.isNew) {
       setTeams(teams.filter(t => t.id !== team.id));
       return;
@@ -106,10 +193,19 @@ export default function OrgPage() {
     try {
       await deleteTeam(team.id);
       setTeams(teams.filter(t => t.id !== team.id));
+      setOriginalTeams(originalTeams.filter(t => t.id !== team.id));
     } catch (error) {
       console.error('Failed to delete team:', error);
       alert('삭제에 실패했습니다. 해당 팀을 사용 중인 멤버가 있는지 확인해주세요.');
     }
+  };
+
+  // 행이 수정되었는지 확인
+  const isRowEdited = (team: EditableTeam) => {
+    if (team.isNew) return true;
+    const original = originalTeams.find(t => t.id === team.id);
+    if (!original) return false;
+    return team.editedName !== original.name || team.editedIsActive !== original.is_active;
   };
 
   if (isLoading) {
@@ -122,14 +218,31 @@ export default function OrgPage() {
 
   return (
     <div>
-      <PageHeader title="팀 설정" description="회사의 팀을 설정합니다." />
+      <PageHeader
+        title="팀 설정"
+        description="회사의 팀을 설정합니다."
+      />
 
       <div className="max-w-2xl">
         {/* 팀 목록 */}
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">팀 목록</h2>
-            <AddButton onClick={handleAddTeam} label="추가" />
+            {isFullAdmin && (
+              <div className="flex items-center gap-2">
+                {hasChanges && (
+                  <button
+                    onClick={handleSaveAll}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition-colors text-sm"
+                  >
+                    <Save className="w-4 h-4" />
+                    {isSaving ? '저장 중...' : '저장'}
+                  </button>
+                )}
+                <AddButton onClick={handleAddTeam} label="추가" />
+              </div>
+            )}
           </div>
 
           <table className="w-full text-sm">
@@ -139,41 +252,47 @@ export default function OrgPage() {
                 <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">
                   활성여부
                 </th>
-                <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">저장</th>
-                <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">삭제</th>
+                {isFullAdmin && (
+                  <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">삭제</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {teams.map((team) => (
-                <tr key={team.id} className={`hover:bg-gray-50 ${team.isNew ? 'bg-blue-50' : ''}`}>
+                <tr
+                  key={team.id}
+                  className={`hover:bg-gray-50 ${isRowEdited(team) ? 'bg-yellow-50' : ''} ${team.isNew ? 'bg-blue-50' : ''}`}
+                >
                   <td className="px-4 py-3">
-                    <input
-                      type="text"
-                      value={team.editedName}
-                      onChange={(e) => setTeams(teams.map(t =>
-                        t.id === team.id ? { ...t, editedName: e.target.value } : t
-                      ))}
-                      placeholder="팀명을 입력하세요"
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
+                    {isFullAdmin ? (
+                      <input
+                        type="text"
+                        value={team.editedName}
+                        onChange={(e) => handleNameChange(team.id, e.target.value)}
+                        placeholder="팀명을 입력하세요"
+                        className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    ) : (
+                      <span className="text-gray-700">{team.name}</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <ToggleSwitch
-                      checked={team.editedIsActive}
-                      onChange={(checked) => setTeams(teams.map(t =>
-                        t.id === team.id ? { ...t, editedIsActive: checked } : t
-                      ))}
-                    />
+                    {isFullAdmin ? (
+                      <ToggleSwitch
+                        checked={team.editedIsActive}
+                        onChange={(checked) => handleActiveChange(team.id, checked)}
+                      />
+                    ) : (
+                      <span className={`px-2 py-1 rounded text-xs ${team.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                        {team.is_active ? '활성' : '비활성'}
+                      </span>
+                    )}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <SaveButton
-                      onClick={() => handleSaveTeam(team)}
-                      disabled={savingTeamId === team.id}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <DeleteButton onClick={() => handleDeleteTeam(team)} />
-                  </td>
+                  {isFullAdmin && (
+                    <td className="px-4 py-3 text-center">
+                      <DeleteButton onClick={() => handleDeleteTeam(team)} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

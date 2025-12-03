@@ -62,8 +62,8 @@ export const useAuthStore = create<AuthState>()((set) => ({
       }
 
       // 멤버 정보 조회
-      const { data: member, error: memberError } = await supabase
-        .from('members')
+      const { data: member, error: memberError } = await (supabase
+        .from('members') as any)
         .select(`
           *,
           team:teams(*),
@@ -142,17 +142,25 @@ export const useAuthStore = create<AuthState>()((set) => ({
     try {
       set({ isLoading: true });
 
-      // 현재 세션 확인
-      const { data: { session } } = await supabase.auth.getSession();
+      // 현재 세션 확인 (타임아웃 5초)
+      const sessionPromise = supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Session timeout')), 5000)
+      );
+
+      const { data: { session } } = await Promise.race([
+        sessionPromise,
+        timeoutPromise,
+      ]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
 
       if (!session?.user) {
         set({ isLoading: false });
         return;
       }
 
-      // 멤버 정보 조회
-      const { data: member, error: memberError } = await supabase
-        .from('members')
+      // 멤버 정보 조회 (타임아웃 5초)
+      const memberPromise = (supabase
+        .from('members') as any)
         .select(`
           *,
           team:teams(*),
@@ -160,6 +168,15 @@ export const useAuthStore = create<AuthState>()((set) => ({
         `)
         .eq('auth_user_id', session.user.id)
         .single();
+
+      const memberTimeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Member query timeout')), 5000)
+      );
+
+      const { data: member, error: memberError } = await Promise.race([
+        memberPromise,
+        memberTimeoutPromise,
+      ]) as Awaited<ReturnType<typeof memberPromise>>;
 
       if (memberError || !member || !member.is_approved || !member.is_active) {
         set({ isLoading: false });

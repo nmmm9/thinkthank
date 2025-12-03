@@ -42,33 +42,43 @@ export async function getOpexByDateRange(startYearMonth: string, endYearMonth: s
 
 // 운영비 생성
 export async function createOpex(opex: OpexInsert) {
-  const { data, error } = await supabase
-    .from('opex')
-    .insert(opex)
-    .select()
-    .single();
+  const { error } = await (supabase
+    .from('opex') as any)
+    .insert(opex);
 
   if (error) throw error;
-  return data;
+  return opex;
 }
 
 // 운영비 수정
 export async function updateOpex(id: string, updates: OpexUpdate) {
-  const { data, error } = await supabase
-    .from('opex')
+  console.log('updateOpex called with:', { id, updates });
+
+  const { data, error } = await (supabase
+    .from('opex') as any)
     .update(updates)
     .eq('id', id)
-    .select()
-    .single();
+    .select();
 
-  if (error) throw error;
-  return data;
+  console.log('updateOpex result:', { data, error });
+
+  if (error) {
+    console.error('updateOpex error details:', JSON.stringify(error, null, 2));
+    throw new Error(error.message || 'Failed to update opex');
+  }
+
+  // 업데이트된 행이 없으면 에러
+  if (!data || data.length === 0) {
+    throw new Error('업데이트 권한이 없거나 해당 데이터를 찾을 수 없습니다.');
+  }
+
+  return data[0];
 }
 
 // 운영비 삭제
 export async function deleteOpex(id: string) {
-  const { error } = await supabase
-    .from('opex')
+  const { error } = await (supabase
+    .from('opex') as any)
     .delete()
     .eq('id', id);
 
@@ -77,12 +87,10 @@ export async function deleteOpex(id: string) {
 
 // 운영비 upsert (없으면 생성, 있으면 수정)
 export async function upsertOpex(opex: OpexInsert) {
-  const { data, error } = await supabase
-    .from('opex')
-    .upsert(opex, { onConflict: 'org_id,year_month' })
-    .select()
-    .single();
+  const { error } = await (supabase
+    .from('opex') as any)
+    .upsert(opex, { onConflict: 'org_id,year_month' });
 
   if (error) throw error;
-  return data;
+  return opex;
 }
