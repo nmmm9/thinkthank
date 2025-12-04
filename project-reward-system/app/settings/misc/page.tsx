@@ -46,7 +46,7 @@ export default function MiscPage() {
       try {
         const categoriesData = await getProjectCategories();
         setProjectCategories(
-          categoriesData.map((cat) => ({
+          categoriesData.map((cat: ProjectCategory) => ({
             ...cat,
             editName: cat.name,
             isModified: false,
@@ -161,7 +161,7 @@ export default function MiscPage() {
       // 새로고침하여 최신 데이터 가져오기
       const categoriesData = await getProjectCategories();
       setProjectCategories(
-        categoriesData.map((cat) => ({
+        categoriesData.map((cat: ProjectCategory) => ({
           ...cat,
           editName: cat.name,
           isModified: false,
@@ -192,7 +192,7 @@ export default function MiscPage() {
 
     try {
       setIsSavingCompany(true);
-      const updatedOrg = await updateOrganization(member.org_id, {
+      const updatedOrg: any = await updateOrganization(member.org_id, {
         name: companyName.trim(),
         logo_url: logoUrl || null,
       });

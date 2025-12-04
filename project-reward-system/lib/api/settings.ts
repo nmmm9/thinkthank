@@ -13,8 +13,8 @@ export async function getWorkTimeSetting() {
 
 // 조직 정보 수정
 export async function updateOrganization(id: string, updates: { name?: string; logo_url?: string | null }) {
-  const { data, error } = await supabase
-    .from('organizations')
+  const { data, error } = await (supabase
+    .from('organizations') as any)
     .update(updates)
     .eq('id', id)
     .select()
