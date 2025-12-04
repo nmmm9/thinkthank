@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject, getMembers } from '@/lib/api';
+import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject, getMembers, updateMember } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import type { Project, Schedule, Member } from '@/lib/supabase/database.types';
 import { SketchPicker } from 'react-color';
@@ -17,7 +17,7 @@ import {
   differenceInDays,
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette, Users, AlertCircle, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette, Users, AlertCircle, Calendar, Lock } from 'lucide-react';
 import GoogleCalendarSync from '@/components/GoogleCalendarSync';
 import { getUnclassifiedSchedules, assignProjectToSchedule } from '@/lib/api';
 import { useCalendarSync } from '@/hooks/useCalendarSync';
@@ -56,6 +56,7 @@ export default function SchedulesPage() {
   const [teamMembers, setTeamMembers] = useState<Member[]>([]);
   const [visibleMembers, setVisibleMembers] = useState<Record<string, boolean>>({});
   const [showMySchedule, setShowMySchedule] = useState(true);
+  const [myColor, setMyColor] = useState<string | null>(null);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
@@ -115,6 +116,7 @@ export default function SchedulesPage() {
     currentStart: '',
     currentEnd: '',
     currentDate: '',
+    isDragging: false, // 동기적 드래그 상태 체크용
   });
 
   // 새 스케줄 생성용 드래그 상태
@@ -152,6 +154,11 @@ export default function SchedulesPage() {
         setVisibleMembers(
           orgMembers.reduce((acc, m) => ({ ...acc, [m.id]: false }), {})
         );
+        // 본인 색상 초기화
+        const myMemberData = (membersData as Member[]).find((m) => m.id === member?.id);
+        if (myMemberData?.color) {
+          setMyColor(myMemberData.color);
+        }
 
         // 미분류 스케줄 로드
         if (member?.id) {
@@ -200,6 +207,8 @@ export default function SchedulesPage() {
 
   // 색상 선택 팝오버 상태
   const [colorPickerProjectId, setColorPickerProjectId] = useState<string | null>(null);
+  const [colorPickerMemberId, setColorPickerMemberId] = useState<string | null>(null);
+  const [previewMemberColor, setPreviewMemberColor] = useState<string | null>(null);
 
   // 색상 팔레트 외부 클릭 시 닫기
   useEffect(() => {
@@ -207,16 +216,25 @@ export default function SchedulesPage() {
       if (colorPickerProjectId && !(e.target as HTMLElement).closest('[data-color-picker]')) {
         setColorPickerProjectId(null);
       }
+      if (colorPickerMemberId && !(e.target as HTMLElement).closest('[data-member-color-picker]')) {
+        setColorPickerMemberId(null);
+        setPreviewMemberColor(null);
+      }
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [colorPickerProjectId]);
+  }, [colorPickerProjectId, colorPickerMemberId]);
 
   // ESC 키로 모달 닫기
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (deleteConfirm) {
+        if (colorPickerMemberId) {
+          setColorPickerMemberId(null);
+          setPreviewMemberColor(null);
+        } else if (colorPickerProjectId) {
+          setColorPickerProjectId(null);
+        } else if (deleteConfirm) {
           setDeleteConfirm(null);
         } else if (contextMenu) {
           setContextMenu(null);
@@ -229,7 +247,7 @@ export default function SchedulesPage() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showScheduleModal, viewingSchedule, contextMenu, deleteConfirm]);
+  }, [showScheduleModal, viewingSchedule, contextMenu, deleteConfirm, colorPickerMemberId, colorPickerProjectId]);
 
   // 컨텍스트 메뉴 외부 클릭 시 닫기
   useEffect(() => {
@@ -373,8 +391,68 @@ export default function SchedulesPage() {
   ];
 
   const getMemberColor = (memberId: string) => {
+    // 미리보기 색상이 있으면 우선 사용
+    if (colorPickerMemberId === memberId && previewMemberColor) {
+      return {
+        bg: '',
+        text: 'text-white',
+        hex: previewMemberColor,
+        light: '',
+        isCustom: true,
+      };
+    }
+    // 본인인 경우
+    if (memberId === member?.id) {
+      if (myColor) {
+        return {
+          bg: '',
+          text: 'text-white',
+          hex: myColor,
+          light: '',
+          isCustom: true,
+        };
+      }
+      // 본인 기본 색상 (파란색)
+      return { bg: 'bg-blue-500', text: 'text-white', hex: '#3b82f6', light: 'bg-blue-100', isCustom: false };
+    }
+    const memberData = teamMembers.find((m) => m.id === memberId);
+    // 저장된 색상이 있으면 사용
+    if (memberData?.color) {
+      return {
+        bg: '',
+        text: 'text-white',
+        hex: memberData.color,
+        light: '',
+        isCustom: true,
+      };
+    }
+    // 기본 색상
     const index = teamMembers.findIndex((m) => m.id === memberId);
-    return memberColors[index % memberColors.length];
+    if (index === -1) {
+      return { bg: 'bg-gray-500', text: 'text-white', hex: '#6b7280', light: 'bg-gray-100', isCustom: false };
+    }
+    return { ...memberColors[index % memberColors.length], isCustom: false };
+  };
+
+  // 멤버 색상 변경
+  const handleMemberColorChange = async (memberId: string, color: string) => {
+    try {
+      await updateMember(memberId, { color });
+      // 본인인 경우 myColor 업데이트
+      if (memberId === member?.id) {
+        setMyColor(color);
+      }
+      // 팀원 목록 업데이트
+      setTeamMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? { ...m, color } : m))
+      );
+      setPreviewMemberColor(null);
+      setColorPickerMemberId(null);
+    } catch (error) {
+      console.error('색상 변경 실패:', error);
+      alert('색상 변경에 실패했습니다.');
+      setPreviewMemberColor(null);
+    }
   };
 
   // 시간 문자열을 분으로 변환 (HH:mm -> 분)
@@ -627,15 +705,46 @@ export default function SchedulesPage() {
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
 
+    // 낙관적 업데이트: 먼저 UI에 반영하고 모달 닫기
+    const tempSchedules: Schedule[] = [];
+    for (const entry of scheduleEntries) {
+      const totalMinutes = parseInt(entry.hours || '0') * 60 + parseInt(entry.minutes || '0');
+      if (totalMinutes === 0) continue;
+
+      const projectId = entry.projectId || null;
+      const tempId = entry.scheduleId || `temp-${Date.now()}-${Math.random()}`;
+
+      tempSchedules.push({
+        id: tempId,
+        org_id: member.org_id,
+        project_id: projectId,
+        member_id: member.id,
+        date: dateStr,
+        minutes: totalMinutes,
+        start_time: entry.startTime || null,
+        end_time: entry.endTime || null,
+        description: entry.description || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as Schedule);
+    }
+
+    // 즉시 UI 업데이트 (기존 스케줄 제거 후 새 스케줄 추가)
+    setSchedules((prev) => {
+      const otherSchedules = prev.filter(
+        (s) => !(s.date === dateStr && s.member_id === member.id)
+      );
+      return [...otherSchedules, ...tempSchedules];
+    });
+    setShowScheduleModal(false);
+
+    // 백그라운드에서 DB 저장
     try {
-      for (const entry of scheduleEntries) {
+      const savePromises = scheduleEntries.map(async (entry) => {
         const totalMinutes = parseInt(entry.hours || '0') * 60 + parseInt(entry.minutes || '0');
+        if (totalMinutes === 0) return null;
 
-        if (totalMinutes === 0) continue;
-
-        // 기타(빈 문자열)는 null로 처리
         const projectId = entry.projectId || null;
-
         const scheduleData = {
           minutes: totalMinutes,
           start_time: entry.startTime || null,
@@ -644,29 +753,30 @@ export default function SchedulesPage() {
         };
 
         if (entry.scheduleId) {
-          // 기존 스케줄 수정
           await updateSchedule(entry.scheduleId, {
             ...scheduleData,
             project_id: projectId ?? undefined,
           });
+          return entry.scheduleId;
         } else {
-          // 새 스케줄 생성
-          await createSchedule({
+          const newSchedule = await createSchedule({
             org_id: member.org_id,
             project_id: projectId,
             member_id: member.id,
             date: dateStr,
             ...scheduleData,
           } as any);
+          return newSchedule?.id;
         }
-      }
+      });
 
-      // 데이터 새로고침
+      await Promise.all(savePromises);
+
+      // 실제 데이터로 교체 (백그라운드)
       const schedulesData = await getSchedules();
       setSchedules(schedulesData);
-      setShowScheduleModal(false);
 
-      // Google Calendar 동기화 (저장된 스케줄들)
+      // Google Calendar 동기화 (백그라운드)
       for (const entry of scheduleEntries) {
         if (parseInt(entry.hours || '0') * 60 + parseInt(entry.minutes || '0') === 0) continue;
 
@@ -680,7 +790,7 @@ export default function SchedulesPage() {
         ) as any;
 
         if (savedSchedule) {
-          await syncSchedule(
+          syncSchedule(
             entry.scheduleId ? 'update' : 'create',
             {
               id: savedSchedule.id,
@@ -838,6 +948,9 @@ export default function SchedulesPage() {
     const schedule = schedules.find((s) => s.id === scheduleId);
     if (!schedule) return;
 
+    // 읽기 전용 이벤트는 드래그 불가
+    if ((schedule as any).is_google_read_only) return;
+
     const startTime = (schedule as any).start_time || '';
     const endTime = (schedule as any).end_time || '';
     const scheduleDate = schedule.date;
@@ -852,6 +965,7 @@ export default function SchedulesPage() {
       currentStart: startTime,
       currentEnd: endTime,
       currentDate: scheduleDate,
+      isDragging: true, // 동기적으로 드래그 시작 표시
     };
 
     setIsDragging(true);
@@ -874,6 +988,9 @@ export default function SchedulesPage() {
     }));
 
     const handleMouseMove = (e: MouseEvent) => {
+      // 드래그 종료 후 이벤트 무시 (동기적 체크)
+      if (!dragRef.current.isDragging) return;
+
       const { startY, startX, originalStart, originalEnd, originalDate } = dragRef.current;
       const deltaY = e.clientY - startY;
       const deltaX = e.clientX - startX;
@@ -943,6 +1060,9 @@ export default function SchedulesPage() {
     };
 
     const handleMouseUp = async () => {
+      // 드래그 즉시 종료 (동기적 - handleMouseMove 차단)
+      dragRef.current.isDragging = false;
+
       const { hasDragged, currentStart, currentEnd, currentDate } = dragRef.current;
 
       // 프리뷰 제거
@@ -1233,7 +1353,10 @@ export default function SchedulesPage() {
                   key={project.id}
                   className="flex items-center gap-2 text-sm p-2 rounded-lg bg-gray-50"
                 >
-                  <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                  <div
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: getMemberColor(member?.id || '').hex }}
+                  />
                   <span className="flex-1 text-gray-900 truncate text-xs">
                     {project.name}
                   </span>
@@ -1271,24 +1394,77 @@ export default function SchedulesPage() {
           <div className="space-y-1">
             {/* 내 스케줄 */}
             <div
-              className={`flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer ${
+              className={`flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors ${
                 !showMySchedule ? 'opacity-50' : ''
               }`}
-              onClick={() => setShowMySchedule(!showMySchedule)}
             >
-              <div
-                className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center text-[10px] font-bold text-white"
-              >
-                {member?.name?.charAt(0)}
+              <div className="relative" data-member-color-picker>
+                <div
+                  className="w-4 h-4 rounded-full cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 transition-all"
+                  style={{ backgroundColor: previewMemberColor && colorPickerMemberId === member?.id ? previewMemberColor : getMemberColor(member?.id || '').hex }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (colorPickerMemberId === member?.id) {
+                      setColorPickerMemberId(null);
+                      setPreviewMemberColor(null);
+                    } else {
+                      setColorPickerMemberId(member?.id || null);
+                      setPreviewMemberColor(null);
+                    }
+                  }}
+                  title="색상 변경"
+                />
+                {colorPickerMemberId === member?.id && (
+                  <div className="absolute left-0 top-6 z-50 bg-white rounded-lg shadow-xl">
+                    <SketchPicker
+                      color={previewMemberColor || getMemberColor(member?.id || '').hex}
+                      onChange={(color) => setPreviewMemberColor(color.hex)}
+                      presetColors={memberColors.map(c => c.hex)}
+                    />
+                    <div className="flex gap-2 p-2 border-t">
+                      <button
+                        className="flex-1 px-3 py-1.5 text-sm text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setColorPickerMemberId(null);
+                          setPreviewMemberColor(null);
+                        }}
+                      >
+                        취소
+                      </button>
+                      <button
+                        className="flex-1 px-3 py-1.5 text-sm text-white bg-blue-500 rounded hover:bg-blue-600 transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (previewMemberColor) {
+                            handleMemberColorChange(member!.id, previewMemberColor);
+                          } else {
+                            setColorPickerMemberId(null);
+                          }
+                        }}
+                      >
+                        확인
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-              <span className="flex-1 text-gray-900 truncate text-xs font-medium">
+              <span
+                className="flex-1 text-gray-900 truncate text-xs font-medium cursor-pointer"
+                onClick={() => setShowMySchedule(!showMySchedule)}
+              >
                 {member?.name} (나)
               </span>
-              {showMySchedule ? (
-                <Eye className="w-3.5 h-3.5 text-gray-400" />
-              ) : (
-                <EyeOff className="w-3.5 h-3.5 text-gray-300" />
-              )}
+              <div
+                className="cursor-pointer"
+                onClick={() => setShowMySchedule(!showMySchedule)}
+              >
+                {showMySchedule ? (
+                  <Eye className="w-3.5 h-3.5 text-gray-400" />
+                ) : (
+                  <EyeOff className="w-3.5 h-3.5 text-gray-300" />
+                )}
+              </div>
             </div>
 
             {/* 팀원 스케줄 */}
@@ -1298,25 +1474,77 @@ export default function SchedulesPage() {
               return (
                 <div
                   key={tm.id}
-                  className={`flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer ${
+                  className={`flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors ${
                     !isVisible ? 'opacity-50' : ''
                   }`}
-                  onClick={() => toggleMemberVisibility(tm.id)}
                 >
-                  <div
-                    className={`w-4 h-4 rounded-full ${color.bg} flex items-center justify-center text-[10px] font-bold ${color.text}`}
-                    style={{ backgroundColor: color.hex }}
-                  >
-                    {tm.name?.charAt(0)}
+                  <div className="relative" data-member-color-picker>
+                    <div
+                      className="w-4 h-4 rounded-full cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 transition-all"
+                      style={{ backgroundColor: previewMemberColor && colorPickerMemberId === tm.id ? previewMemberColor : color.hex }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (colorPickerMemberId === tm.id) {
+                          setColorPickerMemberId(null);
+                          setPreviewMemberColor(null);
+                        } else {
+                          setColorPickerMemberId(tm.id);
+                          setPreviewMemberColor(null);
+                        }
+                      }}
+                      title="색상 변경"
+                    />
+                    {colorPickerMemberId === tm.id && (
+                      <div className="absolute left-0 top-6 z-50 bg-white rounded-lg shadow-xl">
+                        <SketchPicker
+                          color={previewMemberColor || color.hex}
+                          onChange={(c) => setPreviewMemberColor(c.hex)}
+                          presetColors={memberColors.map(mc => mc.hex)}
+                        />
+                        <div className="flex gap-2 p-2 border-t">
+                          <button
+                            className="flex-1 px-3 py-1.5 text-sm text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setColorPickerMemberId(null);
+                              setPreviewMemberColor(null);
+                            }}
+                          >
+                            취소
+                          </button>
+                          <button
+                            className="flex-1 px-3 py-1.5 text-sm text-white bg-blue-500 rounded hover:bg-blue-600 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (previewMemberColor) {
+                                handleMemberColorChange(tm.id, previewMemberColor);
+                              } else {
+                                setColorPickerMemberId(null);
+                              }
+                            }}
+                          >
+                            확인
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <span className="flex-1 text-gray-900 truncate text-xs">
+                  <span
+                    className="flex-1 text-gray-900 truncate text-xs cursor-pointer"
+                    onClick={() => toggleMemberVisibility(tm.id)}
+                  >
                     {tm.name}
                   </span>
-                  {isVisible ? (
-                    <Eye className="w-3.5 h-3.5 text-gray-400" />
-                  ) : (
-                    <EyeOff className="w-3.5 h-3.5 text-gray-300" />
-                  )}
+                  <div
+                    className="cursor-pointer"
+                    onClick={() => toggleMemberVisibility(tm.id)}
+                  >
+                    {isVisible ? (
+                      <Eye className="w-3.5 h-3.5 text-gray-400" />
+                    ) : (
+                      <EyeOff className="w-3.5 h-3.5 text-gray-300" />
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1524,14 +1752,22 @@ export default function SchedulesPage() {
                         const project = projects.find((p) => p.id === schedule.project_id);
                         const isOwnSchedule = schedule.member_id === member?.id;
                         const scheduleMember = !isOwnSchedule ? teamMembers.find((m) => m.id === schedule.member_id) : null;
+                        const isReadOnly = (schedule as any).is_google_read_only === true;
+                        const canEdit = isOwnSchedule && !isReadOnly;
 
-                        // 본인 스케줄은 파란색, 다른 사람은 멤버 색상
-                        const color = isOwnSchedule
-                          ? { bg: 'bg-blue-500', text: 'text-white', hex: '#3b82f6' }
-                          : getMemberColor(schedule.member_id);
+                        // 멤버 색상 가져오기
+                        const color = getMemberColor(schedule.member_id);
 
-                        const width = 100 / totalColumns;
-                        const left = column * width;
+                        // 구글 캘린더 스타일: 겹치는 일정을 살짝 오프셋으로 배치
+                        // 겹치는 수에 따라 동적으로 오프셋과 너비 조절
+                        const maxOffset = 60; // 최대 총 오프셋 (%)
+                        const overlapOffset = totalColumns > 1 ? Math.min(15, maxOffset / (totalColumns - 1)) : 0;
+                        const left = column * overlapOffset;
+                        // 너비는 컬럼 경계를 넘지 않도록 제한
+                        const minWidth = Math.max(40, 100 - maxOffset); // 최소 너비
+                        const width = Math.min(100 - left, Math.max(minWidth, 100 - left - (totalColumns - column - 1) * 3));
+                        // 면적이 큰 일정은 뒤로, 작은 일정은 앞으로 (z-index)
+                        const zIndex = 10 + Math.floor((1 / pos.height) * 1000);
                         const isBeingDragged = isDragging && dragScheduleId === schedule.id;
 
                         return (
@@ -1539,7 +1775,7 @@ export default function SchedulesPage() {
                             key={schedule.id}
                             data-schedule-block
                             data-schedule-id={schedule.id}
-                            className={`absolute rounded-lg ${color.bg || ''} ${color.text} shadow-sm hover:shadow-md z-10 cursor-pointer border-2 border-white ${
+                            className={`absolute rounded-lg ${color.bg || ''} ${color.text} shadow-sm cursor-pointer border-2 border-white ${
                               isBeingDragged ? 'opacity-30' : ''
                             }`}
                             style={{
@@ -1547,15 +1783,23 @@ export default function SchedulesPage() {
                               height: pos.height,
                               left: `calc(${left}% + 2px)`,
                               width: `calc(${width}% - 4px)`,
+                              zIndex,
                               ...(color.hex ? { backgroundColor: color.hex } : {}),
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (dragRef.current.hasDragged) return;
 
-                              if (isOwnSchedule) {
-                                // 본인 스케줄은 편집 모달
+                              if (isOwnSchedule && !isReadOnly) {
+                                // 본인 스케줄이고 읽기 전용이 아닌 경우 편집 모달
                                 openEditModal(schedule, day);
+                              } else if (isReadOnly) {
+                                // 읽기 전용 스케줄은 보기 모달
+                                setViewingSchedule({
+                                  schedule,
+                                  member: teamMembers.find((m) => m.id === schedule.member_id) || member as any,
+                                  project: project || null,
+                                });
                               } else if (scheduleMember) {
                                 // 다른 팀원 스케줄은 보기 모달
                                 setViewingSchedule({
@@ -1566,8 +1810,8 @@ export default function SchedulesPage() {
                               }
                             }}
                             onContextMenu={(e) => {
-                              // 본인 스케줄만 우클릭 메뉴
-                              if (isOwnSchedule) {
+                              // 본인 스케줄이고 읽기 전용이 아닌 경우만 우클릭 메뉴
+                              if (canEdit) {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 setContextMenu({
@@ -1578,8 +1822,23 @@ export default function SchedulesPage() {
                               }
                             }}
                           >
-                            {/* 상단 리사이즈 핸들 - 본인 스케줄만 */}
-                            {isOwnSchedule && (
+                            {/* 읽기 전용 표시 - 빗금 패턴 */}
+                            {isReadOnly && (
+                              <>
+                                <div
+                                  className="absolute inset-0 rounded-lg pointer-events-none z-10"
+                                  style={{
+                                    background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.15) 4px, rgba(255,255,255,0.15) 8px)',
+                                  }}
+                                />
+                                <div className="absolute top-1 right-1 z-20">
+                                  <Lock className="w-3 h-3 opacity-80" />
+                                </div>
+                              </>
+                            )}
+
+                            {/* 상단 리사이즈 핸들 - 편집 가능한 경우만 */}
+                            {canEdit && (
                               <div
                                 className="absolute top-0 left-0 right-0 h-2 cursor-n-resize hover:bg-black/10 rounded-t-lg"
                                 onMouseDown={(e) => handleDragStart(e, schedule.id, 'resize-top')}
@@ -1588,9 +1847,9 @@ export default function SchedulesPage() {
 
                             {/* 내용 */}
                             <div
-                              className={`p-1.5 h-full overflow-hidden ${isOwnSchedule ? 'cursor-move' : ''}`}
-                              onMouseDown={isOwnSchedule ? (e) => handleDragStart(e, schedule.id, 'move') : undefined}
-                              title={`${!isOwnSchedule ? `[${scheduleMember?.name}] ` : ''}${(schedule as any).description || '업무'}\n${(schedule as any).start_time} - ${(schedule as any).end_time}\n${Math.floor(schedule.minutes / 60)}시간 ${schedule.minutes % 60 > 0 ? `${schedule.minutes % 60}분` : ''}\n프로젝트: ${project?.name || '기타'}`}
+                              className={`p-1.5 h-full overflow-hidden ${canEdit ? 'cursor-move' : ''}`}
+                              onMouseDown={canEdit ? (e) => handleDragStart(e, schedule.id, 'move') : undefined}
+                              title={`${!isOwnSchedule ? `[${scheduleMember?.name}] ` : ''}${isReadOnly ? '[읽기 전용] ' : ''}${(schedule as any).description || '업무'}\n${(schedule as any).start_time} - ${(schedule as any).end_time}\n${Math.floor(schedule.minutes / 60)}시간 ${schedule.minutes % 60 > 0 ? `${schedule.minutes % 60}분` : ''}\n프로젝트: ${project?.name || '기타'}`}
                             >
                               {pos.height >= 45 ? (
                                 <>
@@ -1611,8 +1870,8 @@ export default function SchedulesPage() {
                               )}
                             </div>
 
-                            {/* 하단 리사이즈 핸들 - 본인 스케줄만 */}
-                            {isOwnSchedule && (
+                            {/* 하단 리사이즈 핸들 - 편집 가능한 경우만 */}
+                            {canEdit && (
                               <div
                                 className="absolute bottom-0 left-0 right-0 h-2 cursor-s-resize hover:bg-black/10 rounded-b-lg"
                                 onMouseDown={(e) => handleDragStart(e, schedule.id, 'resize-bottom')}
@@ -1668,9 +1927,7 @@ export default function SchedulesPage() {
                             {daySchedules.slice(0, 2).map((schedule) => {
                               const project = projects.find((p) => p.id === schedule.project_id);
                               const isOwnSchedule = schedule.member_id === member?.id;
-                              const color = isOwnSchedule
-                                ? { bg: 'bg-blue-500', text: 'text-white', hex: '#3b82f6' }
-                                : getMemberColor(schedule.member_id);
+                              const color = getMemberColor(schedule.member_id);
                               const scheduleMember = !isOwnSchedule ? teamMembers.find((m) => m.id === schedule.member_id) : null;
                               return (
                                 <div

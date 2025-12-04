@@ -10,6 +10,11 @@ import { ko } from 'date-fns/locale';
 import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
 import { useAuthStore } from '@/lib/auth-store';
 import PerformanceCommentModal from '@/components/PerformanceCommentModal';
+import AnimatedCounter from '@/components/charts/AnimatedCounter';
+import EfficiencyGauge from '@/components/charts/EfficiencyGauge';
+import DistributionDonut from '@/components/charts/DistributionDonut';
+import MemberComparisonChart from '@/components/charts/MemberComparisonChart';
+import ProgressBar from '@/components/charts/ProgressBar';
 
 export default function PerformancePage() {
   const { member: currentUser } = useAuthStore();
@@ -361,7 +366,7 @@ export default function PerformancePage() {
                     {isAdmin ? '총 성과' : '내 배분금액'}
                   </div>
                   <div className={`text-3xl font-bold ${totalPerformance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                    {totalPerformance.toLocaleString()}원
+                    <AnimatedCounter value={totalPerformance} suffix="원" />
                   </div>
                 </div>
               </div>
@@ -492,23 +497,61 @@ export default function PerformancePage() {
                         </div>
                       </div>
 
+                      {/* 진행률 바 */}
+                      <div className="mb-6">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-3">투입 현황</h4>
+                        <ProgressBar
+                          planned={totalPlannedDays}
+                          actual={totalActualDays}
+                          label="투입 일수"
+                          unit="일"
+                        />
+                      </div>
+
                       {/* 성과 배분 */}
                       {actualPerformance > 0 && (
                         <div className="mb-6">
                           <h4 className="text-sm font-semibold text-gray-700 mb-3">성과 배분 (회사 {companySharePercent}% : 팀원 {teamSharePercent}%)</h4>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-gray-100 rounded-lg p-4 border border-gray-200">
-                              <div className="text-sm text-gray-600 mb-1">회사 배분</div>
-                              <div className="text-xl font-bold text-gray-900">
-                                {companyShare.toLocaleString()}원
+                          <div className="flex flex-wrap items-center gap-6">
+                            <DistributionDonut
+                              companyShare={companyShare}
+                              teamShare={teamShare}
+                              companyPercent={companySharePercent}
+                              teamPercent={teamSharePercent}
+                            />
+                            <div className="flex-1 grid grid-cols-2 gap-4">
+                              <div className="bg-gray-100 rounded-lg p-4 border border-gray-200">
+                                <div className="text-sm text-gray-600 mb-1">회사 배분</div>
+                                <div className="text-xl font-bold text-gray-900">
+                                  <AnimatedCounter value={companyShare} suffix="원" />
+                                </div>
+                              </div>
+                              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                                <div className="text-sm text-green-600 mb-1">팀원 배분</div>
+                                <div className="text-xl font-bold text-green-700">
+                                  <AnimatedCounter value={teamShare} suffix="원" />
+                                </div>
                               </div>
                             </div>
-                            <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                              <div className="text-sm text-green-600 mb-1">팀원 배분</div>
-                              <div className="text-xl font-bold text-green-700">
-                                {teamShare.toLocaleString()}원
-                              </div>
-                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 팀원별 비교 차트 */}
+                      {memberPerfs.length > 0 && (
+                        <div className="mb-6">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">팀원별 투입 비교</h4>
+                          <div className="bg-white rounded-lg border border-gray-200 p-4">
+                            <MemberComparisonChart
+                              data={memberPerfs.map((p: any) => ({
+                                memberName: p.memberName,
+                                plannedDays: p.plannedDays,
+                                actualDays: p.actualDays,
+                                savedDays: p.savedDays,
+                                efficiencyRate: p.efficiencyRate,
+                                shareAmount: p.shareAmount,
+                              }))}
+                            />
                           </div>
                         </div>
                       )}
@@ -577,17 +620,27 @@ export default function PerformancePage() {
                   ) : (
                     // 일반 사원: 자신의 성과만 표시
                     <div className="space-y-4">
+                      {/* 진행률 바 */}
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <ProgressBar
+                          planned={myPerf?.plannedDays || 0}
+                          actual={myPerf?.actualDays || 0}
+                          label="내 투입 현황"
+                          unit="일"
+                        />
+                      </div>
+
                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <div className="bg-white rounded-lg p-4 border border-gray-200">
                           <div className="text-sm text-gray-600 mb-1">예상 투입</div>
                           <div className="text-xl font-bold text-gray-900">
-                            {myPerf?.plannedDays || 0}일
+                            <AnimatedCounter value={myPerf?.plannedDays || 0} suffix="일" formatNumber={false} />
                           </div>
                         </div>
                         <div className="bg-white rounded-lg p-4 border border-gray-200">
                           <div className="text-sm text-gray-600 mb-1">실제 투입</div>
                           <div className="text-xl font-bold text-gray-900">
-                            {myPerf?.actualDays || 0}일
+                            <AnimatedCounter value={myPerf?.actualDays || 0} suffix="일" formatNumber={false} />
                           </div>
                         </div>
                         <div className={`rounded-lg p-4 border ${(myPerf?.savedDays || 0) > 0 ? 'bg-green-50 border-green-200' : (myPerf?.savedDays || 0) < 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
@@ -599,22 +652,22 @@ export default function PerformancePage() {
                         <div className={`rounded-lg p-4 border ${(myPerf?.shareAmount || 0) > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                           <div className="text-sm text-gray-600 mb-1">내 배분금액</div>
                           <div className={`text-xl font-bold ${(myPerf?.shareAmount || 0) > 0 ? 'text-green-600' : 'text-gray-600'}`}>
-                            {(myPerf?.shareAmount || 0).toLocaleString()}원
+                            <AnimatedCounter value={myPerf?.shareAmount || 0} suffix="원" />
                           </div>
                         </div>
                       </div>
 
+                      {/* 효율성 게이지 */}
                       <div className="bg-white rounded-lg p-4 border border-gray-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="text-sm text-gray-600">효율성</div>
-                            <div className={`text-lg font-bold ${(myPerf?.efficiencyRate || 0) > 0 ? 'text-green-600' : (myPerf?.efficiencyRate || 0) < 0 ? 'text-red-600' : 'text-gray-600'}`}>
-                              {(myPerf?.efficiencyRate || 0) > 0 ? '+' : ''}{myPerf?.efficiencyRate || 0}%
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm text-gray-600">배분 비율</div>
-                            <div className="text-lg font-bold text-gray-900">
+                        <div className="flex flex-wrap items-center justify-around gap-4">
+                          <EfficiencyGauge
+                            value={myPerf?.efficiencyRate || 0}
+                            size={140}
+                            label="효율성"
+                          />
+                          <div className="text-center">
+                            <div className="text-sm text-gray-600 mb-1">배분 비율</div>
+                            <div className="text-3xl font-bold text-gray-900">
                               {myPerf?.sharePercent || 0}%
                             </div>
                           </div>

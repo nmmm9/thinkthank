@@ -116,6 +116,7 @@ export interface Database {
           is_approved: boolean
           is_active: boolean
           join_date: string
+          color: string | null
           created_at: string
           updated_at: string
         }
@@ -132,6 +133,7 @@ export interface Database {
           is_approved?: boolean
           is_active?: boolean
           join_date?: string
+          color?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -148,6 +150,7 @@ export interface Database {
           is_approved?: boolean
           is_active?: boolean
           join_date?: string
+          color?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -281,6 +284,8 @@ export interface Database {
           start_time: string | null
           end_time: string | null
           description: string | null
+          google_event_id: string | null
+          is_google_read_only: boolean
           created_at: string
           updated_at: string
         }
@@ -294,6 +299,8 @@ export interface Database {
           start_time?: string | null
           end_time?: string | null
           description?: string | null
+          google_event_id?: string | null
+          is_google_read_only?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -307,6 +314,8 @@ export interface Database {
           start_time?: string | null
           end_time?: string | null
           description?: string | null
+          google_event_id?: string | null
+          is_google_read_only?: boolean
           created_at?: string
           updated_at?: string
         }

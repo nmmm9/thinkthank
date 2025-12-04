@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { createClient } from '@supabase/supabase-js';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Gmail SMTP 설정
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+});
 
 // 서버 사이드에서 사용할 Supabase 클라이언트 (service role)
 const supabaseAdmin = createClient(
@@ -100,45 +107,50 @@ export async function POST(request: NextRequest) {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const inviteLink = `${baseUrl}/invite/${token}`;
 
-    // 이메일 발송
-    const { error: emailError } = await resend.emails.send({
-      from: 'CO.UP <onboarding@resend.dev>',
-      to: email,
-      subject: `[CO.UP] ${org?.name || '조직'}에서 초대했습니다`,
-      html: `
-        <div style="font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-          <h1 style="color: #1f2937; font-size: 24px; margin-bottom: 24px;">CO.UP 초대</h1>
+    // 이메일 발송 (Gmail SMTP)
+    try {
+      await transporter.sendMail({
+        from: `CO.UP <${process.env.GMAIL_USER}>`,
+        to: email,
+        subject: `[CO.UP] ${org?.name || '조직'}에서 초대했습니다`,
+        html: `
+          <div style="font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <h1 style="color: #1f2937; font-size: 24px; margin-bottom: 24px;">CO.UP 초대</h1>
 
-          <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 16px;">
-            안녕하세요!<br/>
-            <strong>${org?.name || '조직'}</strong>에서 CO.UP 서비스에 초대했습니다.
-          </p>
+            <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 16px;">
+              안녕하세요!<br/>
+              <strong>${org?.name || '조직'}</strong>에서 CO.UP 서비스에 초대했습니다.
+            </p>
 
-          <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 32px;">
-            아래 버튼을 클릭하여 초대를 수락하고 서비스를 시작하세요.
-          </p>
+            <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 32px;">
+              아래 버튼을 클릭하여 초대를 수락하고 서비스를 시작하세요.
+            </p>
 
-          <a href="${inviteLink}"
-             style="display: inline-block; background-color: #2563eb; color: white; padding: 14px 32px;
-                    text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
-            초대 수락하기
-          </a>
+            <a href="${inviteLink}"
+               style="display: inline-block; background-color: #2563eb; color: white; padding: 14px 32px;
+                      text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+              초대 수락하기
+            </a>
 
-          <p style="color: #9ca3af; font-size: 14px; margin-top: 32px;">
-            이 링크는 7일 후 만료됩니다.<br/>
-            본인이 요청하지 않은 초대라면 이 이메일을 무시하세요.
-          </p>
+            <p style="color: #9ca3af; font-size: 14px; margin-top: 32px;">
+              이 링크는 7일 후 만료됩니다.<br/>
+              본인이 요청하지 않은 초대라면 이 이메일을 무시하세요.
+            </p>
 
-          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;" />
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 32px 0;" />
 
-          <p style="color: #9ca3af; font-size: 12px;">
-            © 2025 CO.UP. All rights reserved.
-          </p>
-        </div>
-      `,
-    });
+            <p style="color: #9ca3af; font-size: 12px;">
+              © 2025 CO.UP. All rights reserved.
+            </p>
+          </div>
+        `,
+      });
 
-    if (emailError) {
+      return NextResponse.json({
+        success: true,
+        message: '초대 이메일이 발송되었습니다.',
+      });
+    } catch (emailError) {
       console.error('Email error:', emailError);
       // 이메일 발송 실패해도 초대는 생성됨 - 링크 직접 공유 가능
       return NextResponse.json({
@@ -147,11 +159,6 @@ export async function POST(request: NextRequest) {
         inviteLink,
       });
     }
-
-    return NextResponse.json({
-      success: true,
-      message: '초대 이메일이 발송되었습니다.',
-    });
 
   } catch (error) {
     console.error('Invite error:', error);

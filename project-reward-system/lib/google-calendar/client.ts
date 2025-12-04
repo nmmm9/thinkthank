@@ -16,6 +16,16 @@ export interface GoogleCalendarEvent {
   };
   updated?: string;
   status?: string; // 'confirmed' | 'tentative' | 'cancelled'
+  // 수정 권한 관련
+  guestsCanModify?: boolean;
+  organizer?: {
+    email: string;
+    self?: boolean; // 본인이 organizer인 경우 true
+  };
+  creator?: {
+    email: string;
+    self?: boolean; // 본인이 creator인 경우 true
+  };
   extendedProperties?: {
     private?: {
       projectId?: string;
@@ -224,6 +234,7 @@ export function googleEventToScheduleData(event: GoogleCalendarEvent): {
   projectName: string | null;
   projectId: string | null;
   google_event_id: string;
+  is_google_read_only: boolean;
 } {
   const startDateTime = new Date(event.start.dateTime);
   const endDateTime = new Date(event.end.dateTime);
@@ -252,6 +263,16 @@ export function googleEventToScheduleData(event: GoogleCalendarEvent): {
     projectName = event.extendedProperties.private.projectName;
   }
 
+  // 읽기 전용 여부 판단
+  // - 본인이 organizer가 아니고, guestsCanModify가 false인 경우 읽기 전용
+  // - creator.self나 organizer.self가 true면 수정 가능
+  const isCreator = event.creator?.self === true;
+  const isOrganizer = event.organizer?.self === true;
+  const canGuestsModify = event.guestsCanModify === true;
+
+  // 본인이 생성자이거나 organizer이거나, 게스트 수정이 허용된 경우 수정 가능
+  const isReadOnly = !isCreator && !isOrganizer && !canGuestsModify;
+
   return {
     date,
     start_time,
@@ -260,6 +281,7 @@ export function googleEventToScheduleData(event: GoogleCalendarEvent): {
     projectName,
     projectId: event.extendedProperties?.private?.projectId || null,
     google_event_id: event.id || '',
+    is_google_read_only: isReadOnly,
   };
 }
 

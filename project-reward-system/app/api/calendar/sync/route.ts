@@ -208,6 +208,7 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
               description: scheduleData.description,
               minutes: Math.max(0, minutes),
               project_id: projectId,
+              is_google_read_only: scheduleData.is_google_read_only,
               updated_at: new Date().toISOString(),
             })
             .eq('id', existingSchedule.id);
@@ -225,6 +226,7 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
           description: scheduleData.description,
           minutes: Math.max(0, minutes),
           google_event_id: event.id,
+          is_google_read_only: scheduleData.is_google_read_only,
         });
         created++;
       }
