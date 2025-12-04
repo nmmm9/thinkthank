@@ -2,10 +2,11 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { getProjects, getMembers, getOpexList, getSchedules } from '@/lib/api';
+import { getProjects, getMembers, getOpexList, getSchedules, getCommentsByMember, type PerformanceCommentWithRelations } from '@/lib/api';
 import type { Project, Opex, MemberWithRelations, Schedule } from '@/lib/supabase/database.types';
-import { ChevronDown, ChevronRight, Briefcase, MessageSquare } from 'lucide-react';
-import { format } from 'date-fns';
+import { ChevronDown, ChevronRight, Briefcase, MessageSquare, MessageCircle, Calendar, User } from 'lucide-react';
+import { format, formatDistanceToNow } from 'date-fns';
+import { ko } from 'date-fns/locale';
 import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
 import { useAuthStore } from '@/lib/auth-store';
 import PerformanceCommentModal from '@/components/PerformanceCommentModal';
@@ -23,6 +24,13 @@ export default function PerformancePage() {
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 탭 상태
+  const [activeTab, setActiveTab] = useState<'performance' | 'feedback'>('performance');
+
+  // 내가 받은 피드백
+  const [myComments, setMyComments] = useState<PerformanceCommentWithRelations[]>([]);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
 
   // 코멘트 모달 상태
   const [commentModal, setCommentModal] = useState<{
@@ -95,6 +103,41 @@ export default function PerformancePage() {
     };
     loadData();
   }, []);
+
+  // 피드백 탭 선택 시 내 코멘트 로드
+  useEffect(() => {
+    const loadMyComments = async () => {
+      if (activeTab !== 'feedback' || !currentUser?.id) return;
+
+      try {
+        setIsLoadingComments(true);
+        const comments = await getCommentsByMember(currentUser.id);
+        setMyComments(comments);
+      } catch (error) {
+        console.error('Failed to load comments:', error);
+      } finally {
+        setIsLoadingComments(false);
+      }
+    };
+    loadMyComments();
+  }, [activeTab, currentUser?.id]);
+
+  // 프로젝트별로 코멘트 그룹핑
+  const commentsByProject = useMemo(() => {
+    const grouped: Record<string, { projectName: string; comments: PerformanceCommentWithRelations[] }> = {};
+
+    myComments.forEach((comment) => {
+      const projectId = comment.project_id;
+      const projectName = comment.project?.name || '알 수 없는 프로젝트';
+
+      if (!grouped[projectId]) {
+        grouped[projectId] = { projectName, comments: [] };
+      }
+      grouped[projectId].comments.push(comment);
+    });
+
+    return grouped;
+  }, [myComments]);
 
   // 프로젝트 펼치기/접기
   const toggleProject = (projectId: string) => {
@@ -258,36 +301,74 @@ export default function PerformancePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* 헤더 */}
-      <div className="bg-white border-b border-gray-200 p-6 mb-6">
+      <div className="bg-white border-b border-gray-200 p-6 pb-0">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">성과</h1>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-gray-600 mb-4">
           {isAdmin ? '프로젝트에 대한 성과를 확인합니다.' : '내가 참여한 프로젝트의 성과를 확인합니다.'}
         </p>
-      </div>
 
-      {/* 연도 및 총 성과 */}
-      <div className="px-6 mb-6">
-        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-4xl font-bold text-gray-900 mb-2">{selectedYear}년</h2>
-              <p className="text-sm text-gray-600">
-                {isAdmin ? '정산 완료된 프로젝트 성과 합계' : '내 성과 배분금액 합계'}
-              </p>
+        {/* 탭 */}
+        <div className="flex gap-1">
+          <button
+            onClick={() => setActiveTab('performance')}
+            className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${
+              activeTab === 'performance'
+                ? 'bg-gray-50 text-blue-600 border-t-2 border-x border-blue-600 border-gray-200 -mb-px'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Briefcase className="w-4 h-4" />
+              프로젝트별 성과
             </div>
-            <div className="text-right">
-              <div className="text-sm text-gray-500 mb-1">
-                {isAdmin ? '총 성과' : '내 배분금액'}
-              </div>
-              <div className={`text-3xl font-bold ${totalPerformance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                {totalPerformance.toLocaleString()}원
-              </div>
+          </button>
+          <button
+            onClick={() => setActiveTab('feedback')}
+            className={`px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${
+              activeTab === 'feedback'
+                ? 'bg-gray-50 text-blue-600 border-t-2 border-x border-blue-600 border-gray-200 -mb-px'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <MessageCircle className="w-4 h-4" />
+              내가 받은 피드백
+              {myComments.length > 0 && (
+                <span className="bg-blue-100 text-blue-600 text-xs px-2 py-0.5 rounded-full">
+                  {myComments.length}
+                </span>
+              )}
             </div>
-          </div>
+          </button>
         </div>
       </div>
 
-      {/* 프로젝트 목록 */}
+      {/* 프로젝트별 성과 탭 */}
+      {activeTab === 'performance' && (
+        <>
+          {/* 연도 및 총 성과 */}
+          <div className="px-6 py-6">
+            <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-4xl font-bold text-gray-900 mb-2">{selectedYear}년</h2>
+                  <p className="text-sm text-gray-600">
+                    {isAdmin ? '정산 완료된 프로젝트 성과 합계' : '내 성과 배분금액 합계'}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-gray-500 mb-1">
+                    {isAdmin ? '총 성과' : '내 배분금액'}
+                  </div>
+                  <div className={`text-3xl font-bold ${totalPerformance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {totalPerformance.toLocaleString()}원
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 프로젝트 목록 */}
       <div className="px-6 space-y-4">
         {displayProjects.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
@@ -557,7 +638,98 @@ export default function PerformancePage() {
             </div>
           );
         })}
-      </div>
+        </div>
+        </>
+      )}
+
+      {/* 내가 받은 피드백 탭 */}
+      {activeTab === 'feedback' && (
+        <div className="px-6 py-6">
+          {isLoadingComments ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+            </div>
+          ) : myComments.length === 0 ? (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+              <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-600 mb-2">받은 피드백이 없습니다</h3>
+              <p className="text-sm text-gray-400">
+                관리자가 피드백을 남기면 여기에 표시됩니다.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* 총 피드백 수 */}
+              <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">전체 피드백</h2>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {Object.keys(commentsByProject).length}개 프로젝트에서 총 {myComments.length}개의 피드백
+                    </p>
+                  </div>
+                  <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-full flex items-center justify-center">
+                    <MessageCircle className="w-8 h-8 text-blue-600" />
+                  </div>
+                </div>
+              </div>
+
+              {/* 프로젝트별 피드백 */}
+              {Object.entries(commentsByProject).map(([projectId, { projectName, comments }]) => (
+                <div key={projectId} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                  {/* 프로젝트 헤더 */}
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-6 py-4 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Briefcase className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">{projectName}</h3>
+                        <p className="text-sm text-gray-500">{comments.length}개의 피드백</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 코멘트 목록 */}
+                  <div className="divide-y divide-gray-100">
+                    {comments.map((comment) => (
+                      <div key={comment.id} className="p-6 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start gap-4">
+                          <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0">
+                            {comment.author?.name?.charAt(0) || '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-gray-900">{comment.author?.name}</span>
+                              <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                                관리자
+                              </span>
+                              {!comment.is_read && (
+                                <span className="text-xs text-white bg-red-500 px-2 py-0.5 rounded-full">
+                                  NEW
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap mb-2">
+                              {comment.content}
+                            </p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <Calendar className="w-3 h-3" />
+                              <span>{format(new Date(comment.created_at), 'yyyy년 M월 d일 HH:mm', { locale: ko })}</span>
+                              <span className="text-gray-300">|</span>
+                              <span>{formatDistanceToNow(new Date(comment.created_at), { addSuffix: true, locale: ko })}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 코멘트 모달 */}
       <PerformanceCommentModal

@@ -55,7 +55,7 @@ export default function NotificationBell() {
   // 알림 클릭 - 읽음 처리 후 성과 페이지 코멘트 모달로 이동
   const handleNotificationClick = async (notification: PerformanceCommentWithRelations) => {
     try {
-      await markCommentAsRead(notification.id);
+      await markCommentAsRead(notification.id, member?.id);
       setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
       setIsOpen(false);
       // URL 파라미터로 프로젝트/멤버 정보 전달하여 모달 자동 열기
@@ -67,8 +67,9 @@ export default function NotificationBell() {
 
   // 모든 알림 읽음 처리
   const handleMarkAllAsRead = async () => {
+    if (!member?.id) return;
     try {
-      await Promise.all(notifications.map((n) => markCommentAsRead(n.id)));
+      await Promise.all(notifications.map((n) => markCommentAsRead(n.id, member.id)));
       setNotifications([]);
     } catch (error) {
       console.error('읽음 처리 실패:', error);

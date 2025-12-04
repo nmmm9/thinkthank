@@ -133,13 +133,25 @@ export async function deleteComment(id: string) {
 }
 
 // 코멘트 읽음 처리
-export async function markCommentAsRead(id: string) {
-  const { error } = await (supabase
+export async function markCommentAsRead(id: string, memberId?: string) {
+  let query = (supabase
     .from('performance_comments') as any)
-    .update({ is_read: true })
+    .update({ is_read: true, updated_at: new Date().toISOString() })
     .eq('id', id);
 
-  if (error) throw error;
+  // memberId가 있으면 본인 코멘트만 수정 가능하도록 필터 추가
+  if (memberId) {
+    query = query.eq('member_id', memberId);
+  }
+
+  const { error, data } = await query.select();
+
+  if (error) {
+    console.error('읽음 처리 오류:', error);
+    throw error;
+  }
+
+  return data;
 }
 
 // 여러 코멘트 읽음 처리
@@ -154,11 +166,18 @@ export async function markCommentsAsRead(ids: string[]) {
 
 // 특정 프로젝트의 모든 코멘트 읽음 처리 (본인 것만)
 export async function markProjectCommentsAsRead(projectId: string, memberId: string) {
-  const { error } = await (supabase
+  const { error, data } = await (supabase
     .from('performance_comments') as any)
-    .update({ is_read: true })
+    .update({ is_read: true, updated_at: new Date().toISOString() })
     .eq('project_id', projectId)
-    .eq('member_id', memberId);
+    .eq('member_id', memberId)
+    .eq('is_read', false)
+    .select();
 
-  if (error) throw error;
+  if (error) {
+    console.error('프로젝트 코멘트 읽음 처리 오류:', error);
+    throw error;
+  }
+
+  return data;
 }

@@ -17,7 +17,10 @@ import {
   differenceInDays,
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette, Users, AlertCircle, Calendar } from 'lucide-react';
+import GoogleCalendarSync from '@/components/GoogleCalendarSync';
+import { getUnclassifiedSchedules, assignProjectToSchedule } from '@/lib/api';
+import { useCalendarSync } from '@/hooks/useCalendarSync';
 
 // 타임라인 설정
 const HOUR_HEIGHT = 60; // 1시간 = 60px
@@ -27,6 +30,23 @@ const TOTAL_HOURS = END_HOUR - START_HOUR;
 
 export default function SchedulesPage() {
   const { member } = useAuthStore();
+
+  // 데이터 새로고침 함수 (useCalendarSync보다 먼저 선언)
+  const refreshSchedules = async () => {
+    const schedulesData = await getSchedules();
+    setSchedules(schedulesData as Schedule[]);
+    if (member?.id) {
+      const unclassified = await getUnclassifiedSchedules(member.id);
+      setUnclassifiedSchedules(unclassified as Schedule[]);
+    }
+  };
+
+  // Google Calendar 자동 동기화 훅
+  const { syncSchedule } = useCalendarSync({
+    onSyncComplete: refreshSchedules,
+    autoSyncInterval: 5 * 60 * 1000, // 5분
+  });
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -52,6 +72,12 @@ export default function SchedulesPage() {
     scheduleId: string;
   } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // 미분류 스케줄 관련
+  const [unclassifiedSchedules, setUnclassifiedSchedules] = useState<Schedule[]>([]);
+  const [showUnclassifiedModal, setShowUnclassifiedModal] = useState(false);
+  const [assigningScheduleId, setAssigningScheduleId] = useState<string | null>(null);
+
   const [scheduleEntries, setScheduleEntries] = useState<Array<{
     projectId: string;
     hours: string;
@@ -126,6 +152,12 @@ export default function SchedulesPage() {
         setVisibleMembers(
           orgMembers.reduce((acc, m) => ({ ...acc, [m.id]: false }), {})
         );
+
+        // 미분류 스케줄 로드
+        if (member?.id) {
+          const unclassified = await getUnclassifiedSchedules(member.id);
+          setUnclassifiedSchedules(unclassified as Schedule[]);
+        }
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -149,7 +181,7 @@ export default function SchedulesPage() {
   const monthEnd = endOfMonth(currentDate);
   const calendarDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
-  const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
+  const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   // 프로젝트 색상 배정 (더 선명한 색상)
@@ -211,10 +243,23 @@ export default function SchedulesPage() {
   // 스케줄 삭제
   const handleDeleteSchedule = async (scheduleId: string) => {
     try {
+      // 삭제 전 스케줄 정보 저장 (Google Calendar 동기화용)
+      const scheduleToDelete = schedules.find((s) => s.id === scheduleId);
+
       await deleteSchedule(scheduleId);
       setSchedules((prev) => prev.filter((s) => s.id !== scheduleId));
       setDeleteConfirm(null);
       setContextMenu(null);
+
+      // Google Calendar에서도 삭제
+      if (scheduleToDelete) {
+        await syncSchedule('delete', {
+          id: scheduleId,
+          date: scheduleToDelete.date,
+          minutes: scheduleToDelete.minutes,
+          google_event_id: (scheduleToDelete as any).google_event_id,
+        });
+      }
     } catch (error) {
       console.error('스케줄 삭제 실패:', error);
       setAlertMessage('스케줄 삭제에 실패했습니다.');
@@ -620,6 +665,37 @@ export default function SchedulesPage() {
       const schedulesData = await getSchedules();
       setSchedules(schedulesData);
       setShowScheduleModal(false);
+
+      // Google Calendar 동기화 (저장된 스케줄들)
+      for (const entry of scheduleEntries) {
+        if (parseInt(entry.hours || '0') * 60 + parseInt(entry.minutes || '0') === 0) continue;
+
+        const projectId = entry.projectId || null;
+        const project = projects.find(p => p.id === projectId);
+        const savedSchedule = schedulesData.find((s: any) =>
+          s.date === dateStr &&
+          s.member_id === member.id &&
+          s.start_time === (entry.startTime || null) &&
+          s.end_time === (entry.endTime || null)
+        ) as any;
+
+        if (savedSchedule) {
+          await syncSchedule(
+            entry.scheduleId ? 'update' : 'create',
+            {
+              id: savedSchedule.id,
+              date: dateStr,
+              start_time: entry.startTime,
+              end_time: entry.endTime,
+              description: entry.description,
+              minutes: parseInt(entry.hours || '0') * 60 + parseInt(entry.minutes || '0'),
+              project_id: projectId || undefined,
+              google_event_id: (savedSchedule as any).google_event_id,
+            },
+            project?.name
+          );
+        }
+      }
     } catch (error: any) {
       console.error('스케줄 저장 실패:', error);
       console.error('에러 메시지:', error?.message);
@@ -898,6 +974,22 @@ export default function SchedulesPage() {
             start_time: currentStart,
             end_time: currentEnd,
           });
+
+          // Google Calendar 동기화
+          const updatedSchedule = schedules.find((s) => s.id === dragScheduleId);
+          if (updatedSchedule) {
+            const project = projects.find((p) => p.id === updatedSchedule.project_id);
+            await syncSchedule('update', {
+              id: dragScheduleId,
+              date: currentDate,
+              start_time: currentStart,
+              end_time: currentEnd,
+              description: (updatedSchedule as any).description,
+              minutes: newMinutes,
+              project_id: updatedSchedule.project_id || undefined,
+              google_event_id: (updatedSchedule as any).google_event_id,
+            }, project?.name);
+          }
         } catch (error) {
           console.error('스케줄 업데이트 실패:', error);
           // 실패 시 원래 값으로 복원
@@ -1229,6 +1321,21 @@ export default function SchedulesPage() {
               );
             })}
           </div>
+
+          {/* Google Calendar 연동 */}
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <GoogleCalendarSync
+              onSyncComplete={async () => {
+                // 동기화 완료 후 데이터 새로고침
+                const schedulesData = await getSchedules();
+                setSchedules(schedulesData as Schedule[]);
+                if (member?.id) {
+                  const unclassified = await getUnclassifiedSchedules(member.id);
+                  setUnclassifiedSchedules(unclassified as Schedule[]);
+                }
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -1288,6 +1395,22 @@ export default function SchedulesPage() {
               </button>
             </div>
           </div>
+
+          {/* 미분류 스케줄 알림 */}
+          {unclassifiedSchedules.length > 0 && (
+            <div
+              className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between cursor-pointer hover:bg-amber-100 transition-colors"
+              onClick={() => setShowUnclassifiedModal(true)}
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+                <span className="text-sm text-amber-800">
+                  <strong>{unclassifiedSchedules.length}개</strong>의 미분류 스케줄이 있습니다
+                </span>
+              </div>
+              <span className="text-sm text-amber-600 font-medium">프로젝트 지정하기 →</span>
+            </div>
+          )}
         </div>
 
         {/* 컨텐츠 */}
@@ -1467,31 +1590,23 @@ export default function SchedulesPage() {
                             <div
                               className={`p-1.5 h-full overflow-hidden ${isOwnSchedule ? 'cursor-move' : ''}`}
                               onMouseDown={isOwnSchedule ? (e) => handleDragStart(e, schedule.id, 'move') : undefined}
-                              title={`${!isOwnSchedule ? `[${scheduleMember?.name}] ` : ''}${project?.name || '기타'}\n${(schedule as any).start_time} - ${(schedule as any).end_time}\n${Math.floor(schedule.minutes / 60)}시간 ${schedule.minutes % 60 > 0 ? `${schedule.minutes % 60}분` : ''}${(schedule as any).description ? `\n${(schedule as any).description}` : ''}`}
+                              title={`${!isOwnSchedule ? `[${scheduleMember?.name}] ` : ''}${(schedule as any).description || '업무'}\n${(schedule as any).start_time} - ${(schedule as any).end_time}\n${Math.floor(schedule.minutes / 60)}시간 ${schedule.minutes % 60 > 0 ? `${schedule.minutes % 60}분` : ''}\n프로젝트: ${project?.name || '기타'}`}
                             >
                               {pos.height >= 45 ? (
                                 <>
-                                  {/* 다른 팀원 스케줄이면 이름 표시 */}
-                                  {!isOwnSchedule && (
-                                    <div className="text-[10px] font-bold opacity-90 truncate leading-tight">
-                                      {scheduleMember?.name}
-                                    </div>
-                                  )}
                                   <div className="text-xs font-semibold truncate leading-tight">
-                                    {project?.name || '기타'}
+                                    {(schedule as any).description || '업무'}
                                   </div>
                                   <div className="text-[10px] font-medium opacity-90 leading-tight">
                                     {(schedule as any).start_time} - {(schedule as any).end_time}
                                   </div>
-                                  {(schedule as any).description && (
-                                    <div className="text-[10px] opacity-75 truncate leading-tight">
-                                      {(schedule as any).description}
-                                    </div>
-                                  )}
+                                  <div className="text-[10px] opacity-75 truncate leading-tight">
+                                    {project?.name || '기타'}
+                                  </div>
                                 </>
                               ) : (
                                 <div className="text-[10px] font-semibold truncate leading-tight">
-                                  {!isOwnSchedule ? `${scheduleMember?.name}: ` : ''}{(schedule as any).description || project?.name || '기타'}
+                                  {(schedule as any).description || '업무'}
                                 </div>
                               )}
                             </div>
@@ -2015,6 +2130,117 @@ export default function SchedulesPage() {
                 className="flex-1 py-3 text-red-600 hover:bg-red-50 transition-colors font-medium border-l border-gray-100"
               >
                 삭제
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 미분류 스케줄 모달 */}
+      {showUnclassifiedModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* 헤더 */}
+            <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-6 h-6 text-white" />
+                  <div>
+                    <h2 className="text-lg font-bold text-white">미분류 스케줄</h2>
+                    <p className="text-amber-100 text-sm">프로젝트를 지정해주세요</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowUnclassifiedModal(false)}
+                  className="p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* 스케줄 목록 */}
+            <div className="max-h-[60vh] overflow-y-auto p-4">
+              {unclassifiedSchedules.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  미분류 스케줄이 없습니다
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {unclassifiedSchedules.map((schedule) => (
+                    <div
+                      key={schedule.id}
+                      className="bg-gray-50 rounded-xl p-4 border border-gray-200"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
+                            <Calendar className="w-4 h-4" />
+                            <span>{format(new Date(schedule.date), 'M월 d일 (EEE)', { locale: ko })}</span>
+                            {(schedule as any).start_time && (
+                              <span>
+                                {(schedule as any).start_time} - {(schedule as any).end_time}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-gray-900 font-medium">
+                            {(schedule as any).description || '설명 없음'}
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0">
+                          {assigningScheduleId === schedule.id ? (
+                            <select
+                              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                              onChange={async (e) => {
+                                if (e.target.value) {
+                                  try {
+                                    await assignProjectToSchedule(schedule.id, e.target.value);
+                                    // 미분류 목록 업데이트
+                                    setUnclassifiedSchedules((prev) =>
+                                      prev.filter((s) => s.id !== schedule.id)
+                                    );
+                                    // 스케줄 목록 새로고침
+                                    const schedulesData = await getSchedules();
+                                    setSchedules(schedulesData as Schedule[]);
+                                  } catch (error) {
+                                    console.error('프로젝트 지정 실패:', error);
+                                  }
+                                  setAssigningScheduleId(null);
+                                }
+                              }}
+                              onBlur={() => setAssigningScheduleId(null)}
+                              autoFocus
+                            >
+                              <option value="">프로젝트 선택</option>
+                              {projects.map((project) => (
+                                <option key={project.id} value={project.id}>
+                                  {project.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button
+                              onClick={() => setAssigningScheduleId(schedule.id)}
+                              className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-200 transition-colors"
+                            >
+                              프로젝트 지정
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 하단 */}
+            <div className="border-t border-gray-100 p-4 bg-gray-50">
+              <button
+                onClick={() => setShowUnclassifiedModal(false)}
+                className="w-full py-2.5 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+              >
+                닫기
               </button>
             </div>
           </div>
