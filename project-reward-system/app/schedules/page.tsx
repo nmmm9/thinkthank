@@ -2469,7 +2469,8 @@ export default function SchedulesPage() {
                               autoFocus
                             >
                               <option value="">프로젝트 선택</option>
-                              {projects.map((project) => (
+                              {/* 본인에게 할당된 프로젝트만 표시 */}
+                              {myActiveProjects.map((project) => (
                                 <option key={project.id} value={project.id}>
                                   {project.name}
                                 </option>
