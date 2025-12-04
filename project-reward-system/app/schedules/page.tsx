@@ -1757,10 +1757,8 @@ export default function SchedulesPage() {
                         // 미분류 스케줄 여부 (본인 스케줄이고 프로젝트가 없는 경우)
                         const isUnclassified = isOwnSchedule && !schedule.project_id;
 
-                        // 멤버 색상 가져오기 (미분류는 빨간색)
-                        const color = isUnclassified
-                          ? { bg: 'bg-red-500', text: 'text-white', hex: '#ef4444', light: 'bg-red-100', isCustom: false }
-                          : getMemberColor(schedule.member_id);
+                        // 멤버 색상 가져오기
+                        const color = getMemberColor(schedule.member_id);
 
                         // 구글 캘린더 스타일: 겹치는 일정을 살짝 오프셋으로 배치
                         // 겹치는 수에 따라 동적으로 오프셋과 너비 조절
@@ -1771,9 +1769,7 @@ export default function SchedulesPage() {
                         const minWidth = Math.max(40, 100 - maxOffset); // 최소 너비
                         const width = Math.min(100 - left, Math.max(minWidth, 100 - left - (totalColumns - column - 1) * 3));
                         // 면적이 큰 일정은 뒤로, 작은 일정은 앞으로 (z-index)
-                        // 미분류 스케줄은 맨 앞에 표시 (z-index 2000+)
-                        const baseZIndex = 10 + Math.floor((1 / pos.height) * 1000);
-                        const zIndex = isUnclassified ? 2000 + baseZIndex : baseZIndex;
+                        const zIndex = 10 + Math.floor((1 / pos.height) * 1000);
                         const isBeingDragged = isDragging && dragScheduleId === schedule.id;
 
                         return (
@@ -1781,9 +1777,9 @@ export default function SchedulesPage() {
                             key={schedule.id}
                             data-schedule-block
                             data-schedule-id={schedule.id}
-                            className={`absolute rounded-lg ${color.bg || ''} ${color.text} shadow-sm cursor-pointer ${
-                              isUnclassified ? 'border-2 border-red-300' : 'border-2 border-white'
-                            } ${isBeingDragged ? 'opacity-30' : ''}`}
+                            className={`absolute rounded-lg ${color.bg || ''} ${color.text} shadow-sm cursor-pointer border-2 border-white ${
+                              isBeingDragged ? 'opacity-30' : ''
+                            }`}
                             style={{
                               top: TOP_PADDING + pos.top,
                               height: pos.height,
@@ -1828,6 +1824,13 @@ export default function SchedulesPage() {
                               }
                             }}
                           >
+                            {/* 미분류 스케줄 표시 - 빨간 점 */}
+                            {isUnclassified && (
+                              <div className="absolute top-1 left-1 z-20">
+                                <div className="w-2.5 h-2.5 bg-red-500 rounded-full border border-white shadow-sm" />
+                              </div>
+                            )}
+
                             {/* 읽기 전용 표시 - 빗금 패턴 */}
                             {isReadOnly && (
                               <>
