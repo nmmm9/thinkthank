@@ -236,17 +236,15 @@ export function googleEventToScheduleData(event: GoogleCalendarEvent): {
   google_event_id: string;
   is_google_read_only: boolean;
 } {
-  const startDateTime = new Date(event.start.dateTime);
-  const endDateTime = new Date(event.end.dateTime);
+  // ISO 문자열에서 직접 날짜/시간 추출 (서버 시간대 영향 없음)
+  // 형식: 2025-01-15T09:00:00+09:00 또는 2025-01-15T09:00:00
+  const startStr = event.start.dateTime;
+  const endStr = event.end.dateTime;
 
-  // 로컬 시간대(Asia/Seoul) 기준으로 날짜 추출 (UTC 변환으로 인한 날짜 밀림 방지)
-  const year = startDateTime.getFullYear();
-  const month = String(startDateTime.getMonth() + 1).padStart(2, '0');
-  const day = String(startDateTime.getDate()).padStart(2, '0');
-  const date = `${year}-${month}-${day}`;
-
-  const start_time = startDateTime.toTimeString().slice(0, 5);
-  const end_time = endDateTime.toTimeString().slice(0, 5);
+  // T 앞부분이 날짜, T와 + 또는 : 사이가 시간
+  const date = startStr.split('T')[0]; // 2025-01-15
+  const start_time = startStr.split('T')[1]?.slice(0, 5) || '09:00'; // 09:00
+  const end_time = endStr.split('T')[1]?.slice(0, 5) || '18:00'; // 18:00
 
   // 제목에서 프로젝트명 파싱: [프로젝트명] 설명
   let projectName: string | null = null;
