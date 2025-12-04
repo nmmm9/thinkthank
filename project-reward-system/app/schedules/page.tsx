@@ -602,7 +602,7 @@ export default function SchedulesPage() {
           // 기존 스케줄 수정
           await updateSchedule(entry.scheduleId, {
             ...scheduleData,
-            project_id: projectId,
+            project_id: projectId ?? undefined,
           });
         } else {
           // 새 스케줄 생성
