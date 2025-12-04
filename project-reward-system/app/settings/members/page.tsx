@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
 import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import { ToggleSwitch, DeleteButton } from '@/components/ActionButtons';
+import Modal from '@/components/Modal';
 import { getMembers, getTeams, updateMember, deleteMember } from '@/lib/api';
 import type { Member, Team } from '@/lib/supabase/database.types';
-import { Eye, Save } from 'lucide-react';
+import { Eye, Save, UserPlus, Mail } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth-store';
 
 // 확장된 멤버 타입
@@ -46,6 +47,13 @@ export default function MembersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [editedMembers, setEditedMembers] = useState<Record<string, Partial<Member>>>({});
+
+  // 초대 관련 상태
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('user');
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 변경사항 있는지 확인
   const hasChanges = Object.keys(editedMembers).length > 0;
@@ -215,6 +223,57 @@ export default function MembersPage() {
     return team?.name || '-';
   };
 
+  // 초대 핸들러
+  const handleInvite = async () => {
+    if (!inviteEmail || !currentUser?.organization?.id) return;
+
+    setIsInviting(true);
+    setInviteMessage(null);
+
+    try {
+      const response = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail,
+          role: inviteRole,
+          orgId: currentUser.organization.id,
+          invitedBy: currentUser.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setInviteMessage({ type: 'error', text: data.error || '초대 발송에 실패했습니다.' });
+        return;
+      }
+
+      setInviteMessage({ type: 'success', text: data.message });
+      setInviteEmail('');
+      setInviteRole('user');
+
+      // 3초 후 모달 닫기
+      setTimeout(() => {
+        setIsInviteModalOpen(false);
+        setInviteMessage(null);
+      }, 3000);
+    } catch (error) {
+      console.error('Invite error:', error);
+      setInviteMessage({ type: 'error', text: '초대 처리 중 오류가 발생했습니다.' });
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  // 모달 닫기
+  const handleCloseInviteModal = () => {
+    setIsInviteModalOpen(false);
+    setInviteEmail('');
+    setInviteRole('user');
+    setInviteMessage(null);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -228,10 +287,21 @@ export default function MembersPage() {
 
   return (
     <div>
-      <PageHeader
-        title="팀원"
-        description="팀원 정보를 관리합니다."
-      />
+      <div className="flex items-center justify-between mb-6">
+        <PageHeader
+          title="팀원"
+          description="팀원 정보를 관리합니다."
+        />
+        {isAdminOrManager && (
+          <button
+            onClick={() => setIsInviteModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+          >
+            <UserPlus className="w-4 h-4" />
+            팀원 초대
+          </button>
+        )}
+      </div>
 
       <div className="flex items-center justify-between mb-4">
         <FilterBar onSearch={() => console.log('Search')}>
@@ -379,6 +449,72 @@ export default function MembersPage() {
           </div>
         )}
       </div>
+
+      {/* 초대 모달 */}
+      <Modal
+        isOpen={isInviteModalOpen}
+        onClose={handleCloseInviteModal}
+        title="팀원 초대"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              이메일 주소
+            </label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="초대할 이메일을 입력하세요"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              권한
+            </label>
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="user">일반</option>
+              <option value="manager">팀관리자</option>
+              {isFullAdmin && <option value="admin">총괄관리자</option>}
+            </select>
+          </div>
+
+          {inviteMessage && (
+            <div className={`p-3 rounded-lg ${
+              inviteMessage.type === 'success'
+                ? 'bg-green-50 border border-green-200 text-green-600'
+                : 'bg-red-50 border border-red-200 text-red-600'
+            }`}>
+              <p className="text-sm">{inviteMessage.text}</p>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={handleCloseInviteModal}
+              className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              취소
+            </button>
+            <button
+              onClick={handleInvite}
+              disabled={!inviteEmail || isInviting}
+              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {isInviting ? '발송 중...' : '초대 발송'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

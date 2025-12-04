@@ -27,6 +27,7 @@ interface AuthState {
 
   // 액션
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   setMember: (member: MemberWithRelations | null) => void;
   clearError: () => void;
@@ -112,6 +113,34 @@ export const useAuthStore = create<AuthState>()((set) => ({
     }
   },
 
+  // Google 로그인
+  loginWithGoogle: async () => {
+    try {
+      set({ isLoading: true, error: null });
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/`,
+          scopes: 'https://www.googleapis.com/auth/calendar',
+        },
+      });
+
+      if (error) {
+        set({ isLoading: false, error: error.message });
+        return { success: false, error: error.message };
+      }
+
+      // OAuth는 리다이렉트 방식이므로 여기서는 성공 반환
+      // 실제 인증 완료는 리다이렉트 후 initialize에서 처리
+      return { success: true };
+    } catch (error) {
+      console.error('Google login error:', error);
+      set({ isLoading: false, error: 'Google 로그인 중 오류가 발생했습니다.' });
+      return { success: false, error: 'Google 로그인 중 오류가 발생했습니다.' };
+    }
+  },
+
   // 로그아웃
   logout: async () => {
     try {
@@ -178,8 +207,86 @@ export const useAuthStore = create<AuthState>()((set) => ({
         memberTimeoutPromise,
       ]) as Awaited<ReturnType<typeof memberPromise>>;
 
-      if (memberError || !member || !member.is_approved || !member.is_active) {
+      // 멤버가 없으면 자동 생성 (Google 로그인 등 신규 사용자)
+      // 단, 초대 토큰이 있으면 /invite/callback에서 처리하므로 건너뜀
+      if (memberError?.code === 'PGRST116' || !member) {
+        const pendingInviteToken = typeof window !== 'undefined'
+          ? localStorage.getItem('pendingInviteToken')
+          : null;
+
+        if (pendingInviteToken) {
+          // 초대 처리는 /invite/callback에서 진행
+          set({ isLoading: false });
+          return;
+        }
+
+        // 기본 조직 가져오기
+        const { data: org } = await (supabase
+          .from('organizations') as any)
+          .select('id')
+          .limit(1)
+          .single();
+
+        if (org) {
+          // 새 멤버 생성 (승인 대기 상태)
+          const userName = session.user.user_metadata?.full_name
+            || session.user.user_metadata?.name
+            || session.user.email?.split('@')[0]
+            || '새 사용자';
+
+          const { data: newMember, error: createError } = await (supabase
+            .from('members') as any)
+            .insert({
+              org_id: org.id,
+              auth_user_id: session.user.id,
+              name: userName,
+              email: session.user.email,
+              role: 'user',
+              is_approved: false,
+              is_active: true,
+            })
+            .select(`
+              *,
+              team:teams(*),
+              organization:organizations(*)
+            `)
+            .single();
+
+          if (!createError && newMember) {
+            // 승인 대기 상태로 에러 메시지 설정
+            set({
+              user: session.user,
+              member: newMember as MemberWithRelations,
+              isAuthenticated: false,
+              isLoading: false,
+              error: '회원가입이 완료되었습니다. 관리자 승인을 기다려주세요.',
+            });
+            return;
+          }
+        }
+
         set({ isLoading: false });
+        return;
+      }
+
+      // 승인되지 않은 경우
+      if (!member.is_approved) {
+        set({
+          user: session.user,
+          member: member as MemberWithRelations,
+          isAuthenticated: false,
+          isLoading: false,
+          error: '아직 승인되지 않은 계정입니다. 관리자 승인을 기다려주세요.',
+        });
+        return;
+      }
+
+      // 비활성화된 경우
+      if (!member.is_active) {
+        set({
+          isLoading: false,
+          error: '비활성화된 계정입니다. 관리자에게 문의하세요.',
+        });
         return;
       }
 

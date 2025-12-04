@@ -138,12 +138,12 @@ export default function PerformanceCommentModal({
         <div className="relative bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 px-6 py-5">
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-all"
+            className="absolute top-4 right-4 p-2 text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-all z-10"
           >
             <X className="w-5 h-5" />
           </button>
 
-          <div className="relative">
+          <div className="relative pr-10">
             <div className="flex items-center gap-2 text-blue-100 text-sm mb-1">
               <Sparkles className="w-4 h-4" />
               <span>성과 피드백</span>

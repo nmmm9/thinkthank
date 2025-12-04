@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject } from '@/lib/api';
+import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject, getMembers } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
-import type { Project, Schedule } from '@/lib/supabase/database.types';
+import type { Project, Schedule, Member } from '@/lib/supabase/database.types';
+import { SketchPicker } from 'react-color';
 import {
   format,
   startOfMonth,
@@ -16,7 +17,7 @@ import {
   differenceInDays,
 } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette, Users } from 'lucide-react';
 
 // 타임라인 설정
 const HOUR_HEIGHT = 60; // 1시간 = 60px
@@ -32,10 +33,25 @@ export default function SchedulesPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [visibleProjects, setVisibleProjects] = useState<Record<string, boolean>>({});
+  const [teamMembers, setTeamMembers] = useState<Member[]>([]);
+  const [visibleMembers, setVisibleMembers] = useState<Record<string, boolean>>({});
+  const [showMySchedule, setShowMySchedule] = useState(true);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const [viewingSchedule, setViewingSchedule] = useState<{
+    schedule: Schedule;
+    member: Member;
+    project: Project | null;
+  } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    scheduleId: string;
+  } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [scheduleEntries, setScheduleEntries] = useState<Array<{
     projectId: string;
     hours: string;
@@ -91,14 +107,24 @@ export default function SchedulesPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [projectsData, schedulesData] = await Promise.all([
+        const [projectsData, schedulesData, membersData] = await Promise.all([
           getProjects(),
           getSchedules(),
+          getMembers(),
         ]);
         setProjects(projectsData as Project[]);
         setSchedules(schedulesData as Schedule[]);
         setVisibleProjects(
           (projectsData as Project[]).reduce((acc, p) => ({ ...acc, [p.id]: true }), {})
+        );
+        // 같은 조직의 멤버만 필터링 (본인 제외)
+        const orgMembers = (membersData as Member[]).filter(
+          (m) => m.org_id === member?.org_id && m.id !== member?.id
+        );
+        setTeamMembers(orgMembers);
+        // 기본적으로 모든 팀원 스케줄 숨김
+        setVisibleMembers(
+          orgMembers.reduce((acc, m) => ({ ...acc, [m.id]: false }), {})
         );
       } catch (error) {
         console.error('Failed to load data:', error);
@@ -107,7 +133,7 @@ export default function SchedulesPage() {
       }
     };
     loadData();
-  }, []);
+  }, [member?.org_id, member?.id]);
 
   // 현재 시간으로 스크롤
   useEffect(() => {
@@ -154,10 +180,76 @@ export default function SchedulesPage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [colorPickerProjectId]);
 
-  const getProjectColor = (projectId: string) => {
+  // ESC 키로 모달 닫기
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (deleteConfirm) {
+          setDeleteConfirm(null);
+        } else if (contextMenu) {
+          setContextMenu(null);
+        } else if (viewingSchedule) {
+          setViewingSchedule(null);
+        } else if (showScheduleModal) {
+          setShowScheduleModal(false);
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showScheduleModal, viewingSchedule, contextMenu, deleteConfirm]);
+
+  // 컨텍스트 메뉴 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClick = () => {
+      if (contextMenu) setContextMenu(null);
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [contextMenu]);
+
+  // 스케줄 삭제
+  const handleDeleteSchedule = async (scheduleId: string) => {
+    try {
+      await deleteSchedule(scheduleId);
+      setSchedules((prev) => prev.filter((s) => s.id !== scheduleId));
+      setDeleteConfirm(null);
+      setContextMenu(null);
+    } catch (error) {
+      console.error('스케줄 삭제 실패:', error);
+      setAlertMessage('스케줄 삭제에 실패했습니다.');
+    }
+  };
+
+  const getProjectColor = (projectId: string | null) => {
+    // 프로젝트가 없으면 기본 회색
+    if (!projectId) {
+      return {
+        key: 'none',
+        bg: 'bg-gray-400',
+        hover: 'hover:bg-gray-500',
+        text: 'text-white',
+        light: 'bg-gray-100',
+        hex: '#9CA3AF',
+        isCustom: false,
+      };
+    }
+
     const project = projects.find((p) => p.id === projectId);
     // 저장된 색상이 있으면 사용
     if (project?.color) {
+      // hex 코드인 경우 (# 으로 시작)
+      if (project.color.startsWith('#')) {
+        return {
+          key: 'custom',
+          bg: '',
+          hover: '',
+          text: 'text-white',
+          light: '',
+          hex: project.color,
+          isCustom: true,
+        };
+      }
       const savedColor = projectColors.find((c) => c.key === project.color);
       if (savedColor) return savedColor;
     }
@@ -198,17 +290,46 @@ export default function SchedulesPage() {
   }, [activeProjects, member]);
 
   const completedProjects = useMemo(() => {
+    if (!member) return [];
     return projects.filter((p) => {
       const end = new Date(p.end_date);
-      return end < new Date();
+      if (end >= new Date()) return false;
+      // 본인에게 할당된 프로젝트만
+      const allocations = (p as any).allocations || [];
+      return allocations.some((a: any) => a.member_id === member.id);
     });
-  }, [projects]);
+  }, [projects, member]);
 
   const toggleProjectVisibility = (projectId: string) => {
     setVisibleProjects((prev) => ({
       ...prev,
       [projectId]: !prev[projectId],
     }));
+  };
+
+  // 팀원 스케줄 토글
+  const toggleMemberVisibility = (memberId: string) => {
+    setVisibleMembers((prev) => ({
+      ...prev,
+      [memberId]: !prev[memberId],
+    }));
+  };
+
+  // 팀원별 색상 (구글 캘린더 스타일)
+  const memberColors = [
+    { bg: 'bg-rose-400', text: 'text-white', hex: '#fb7185', light: 'bg-rose-100' },
+    { bg: 'bg-amber-400', text: 'text-white', hex: '#fbbf24', light: 'bg-amber-100' },
+    { bg: 'bg-lime-500', text: 'text-white', hex: '#84cc16', light: 'bg-lime-100' },
+    { bg: 'bg-cyan-400', text: 'text-white', hex: '#22d3ee', light: 'bg-cyan-100' },
+    { bg: 'bg-violet-400', text: 'text-white', hex: '#a78bfa', light: 'bg-violet-100' },
+    { bg: 'bg-pink-400', text: 'text-white', hex: '#f472b6', light: 'bg-pink-100' },
+    { bg: 'bg-emerald-400', text: 'text-white', hex: '#34d399', light: 'bg-emerald-100' },
+    { bg: 'bg-sky-400', text: 'text-white', hex: '#38bdf8', light: 'bg-sky-100' },
+  ];
+
+  const getMemberColor = (memberId: string) => {
+    const index = teamMembers.findIndex((m) => m.id === memberId);
+    return memberColors[index % memberColors.length];
   };
 
   // 시간 문자열을 분으로 변환 (HH:mm -> 분)
@@ -361,7 +482,7 @@ export default function SchedulesPage() {
 
   // 스케줄 항목 추가
   const addScheduleEntry = () => {
-    setScheduleEntries([...scheduleEntries, { projectId: '', hours: '1', minutes: '0', startTime: '', endTime: '', description: '' }]);
+    setScheduleEntries([...scheduleEntries, { projectId: '__none__', hours: '1', minutes: '0', startTime: '', endTime: '', description: '' }]);
   };
 
   // 스케줄 항목 삭제
@@ -398,7 +519,7 @@ export default function SchedulesPage() {
       const startTime = `${String(hour).padStart(2, '0')}:00`;
       const endTime = `${String(hour + 1).padStart(2, '0')}:00`;
       setScheduleEntries([{
-        projectId: '',
+        projectId: '__none__',
         hours: '1',
         minutes: '0',
         startTime,
@@ -409,7 +530,7 @@ export default function SchedulesPage() {
       // 기존 스케줄이 있으면 불러오기
       setScheduleEntries(
         daySchedules.map((s) => ({
-          projectId: s.project_id,
+          projectId: s.project_id || '',  // null이면 '기타'로 처리
           hours: String(Math.floor(s.minutes / 60)),
           minutes: String(s.minutes % 60),
           startTime: (s as any).start_time || '',
@@ -420,7 +541,7 @@ export default function SchedulesPage() {
       );
     } else {
       // 없으면 빈 항목 하나 (기본 9시 시작)
-      setScheduleEntries([{ projectId: '', hours: '1', minutes: '0', startTime: '09:00', endTime: '10:00', description: '' }]);
+      setScheduleEntries([{ projectId: '__none__', hours: '1', minutes: '0', startTime: '09:00', endTime: '10:00', description: '' }]);
     }
 
     setSelectedDate(date);
@@ -452,15 +573,23 @@ export default function SchedulesPage() {
   const saveSchedules = async () => {
     if (!member || !selectedDate) return;
 
+    // 프로젝트 미선택 검증
+    const unselectedEntries = scheduleEntries.filter(entry => entry.projectId === '__none__');
+    if (unselectedEntries.length > 0) {
+      setAlertMessage('프로젝트를 선택해주세요.');
+      return;
+    }
+
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
 
     try {
       for (const entry of scheduleEntries) {
-        if (!entry.projectId) continue;
-
         const totalMinutes = parseInt(entry.hours || '0') * 60 + parseInt(entry.minutes || '0');
 
         if (totalMinutes === 0) continue;
+
+        // 기타(빈 문자열)는 null로 처리
+        const projectId = entry.projectId || null;
 
         const scheduleData = {
           minutes: totalMinutes,
@@ -471,12 +600,15 @@ export default function SchedulesPage() {
 
         if (entry.scheduleId) {
           // 기존 스케줄 수정
-          await updateSchedule(entry.scheduleId, scheduleData);
+          await updateSchedule(entry.scheduleId, {
+            ...scheduleData,
+            project_id: projectId,
+          });
         } else {
           // 새 스케줄 생성
           await createSchedule({
             org_id: member.org_id,
-            project_id: entry.projectId,
+            project_id: projectId,
             member_id: member.id,
             date: dateStr,
             ...scheduleData,
@@ -496,13 +628,30 @@ export default function SchedulesPage() {
     }
   };
 
-  // 특정 날짜의 스케줄 가져오기
-  const getDaySchedules = (date: Date) => {
+  // 특정 날짜의 스케줄 가져오기 (본인 + 선택된 팀원)
+  const getDaySchedules = (date: Date, includeOthers: boolean = true) => {
     if (!member) return [];
     const dateStr = format(date, 'yyyy-MM-dd');
-    return schedules.filter(
-      (s) => s.member_id === member.id && s.date === dateStr && visibleProjects[s.project_id]
-    );
+    return schedules.filter((s) => {
+      if (s.date !== dateStr) return false;
+
+      // 본인 스케줄
+      if (s.member_id === member.id) {
+        // 본인 스케줄 토글이 꺼져있으면 표시 안함
+        if (!showMySchedule) return false;
+        // 기타 스케줄 (project_id가 없는 경우) - 항상 표시
+        if (!s.project_id) return true;
+        // 일반 프로젝트
+        return visibleProjects[s.project_id];
+      }
+
+      // 다른 팀원 스케줄 (토글이 켜진 경우만)
+      if (includeOthers && visibleMembers[s.member_id]) {
+        return true;
+      }
+
+      return false;
+    });
   };
 
   // 스케줄 블록의 위치 계산
@@ -828,7 +977,7 @@ export default function SchedulesPage() {
         const duration = currentEndHour - currentStartHour;
 
         setScheduleEntries([{
-          projectId: '',
+          projectId: '__none__',
           hours: String(duration),
           minutes: '0',
           startTime,
@@ -984,88 +1133,102 @@ export default function SchedulesPage() {
 
         {/* 프로젝트 목록 */}
         <div className="flex-1 overflow-y-auto p-4">
-          <h3 className="text-sm font-semibold text-gray-900 mb-2">내 프로젝트</h3>
-          <div className="space-y-1">
-            {myActiveProjects.map((project) => {
-              const color = getProjectColor(project.id);
-              const isColorPickerOpen = colorPickerProjectId === project.id;
-              return (
-                <div key={project.id} className="relative">
+          <h3 className="text-sm font-semibold text-gray-900 mb-2">진행중인 프로젝트</h3>
+          {myActiveProjects.length > 0 ? (
+            <div className="space-y-1 mb-4">
+              {myActiveProjects.map((project) => (
+                <div
+                  key={project.id}
+                  className="flex items-center gap-2 text-sm p-2 rounded-lg bg-gray-50"
+                >
+                  <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                  <span className="flex-1 text-gray-900 truncate text-xs">
+                    {project.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-400 mb-4">진행중인 프로젝트가 없습니다</p>
+          )}
+
+          {completedProjects.length > 0 && (
+            <>
+              <h3 className="text-sm font-semibold text-gray-900 mb-2">마감된 프로젝트</h3>
+              <div className="space-y-1 mb-4">
+                {completedProjects.slice(0, 5).map((project) => (
                   <div
-                    className="flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer"
+                    key={project.id}
+                    className="flex items-center gap-2 text-sm p-2 rounded-lg opacity-60"
                   >
-                    {/* 색상 선택 버튼 */}
-                    <button
-                      data-color-picker
-                      className={`w-4 h-4 rounded-full ${color.bg} flex-shrink-0 hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 transition-all`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setColorPickerProjectId(isColorPickerOpen ? null : project.id);
-                      }}
-                      title="색상 변경"
-                    />
-                    <span
-                      className="flex-1 text-gray-900 truncate text-xs"
-                      onClick={() => toggleProjectVisibility(project.id)}
-                    >
+                    <div className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />
+                    <span className="flex-1 text-gray-500 truncate text-xs">
                       {project.name}
                     </span>
-                    <button
-                      className="flex-shrink-0"
-                      onClick={() => toggleProjectVisibility(project.id)}
-                    >
-                      {visibleProjects[project.id] ? (
-                        <Eye className="w-3.5 h-3.5 text-gray-400" />
-                      ) : (
-                        <EyeOff className="w-3.5 h-3.5 text-gray-300" />
-                      )}
-                    </button>
                   </div>
-                  {/* 색상 팔레트 팝오버 */}
-                  {isColorPickerOpen && (
-                    <div
-                      data-color-picker
-                      className="absolute left-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 p-2 z-50"
-                    >
-                      <div className="grid grid-cols-5 gap-1">
-                        {projectColors.map((c) => (
-                          <button
-                            key={c.key}
-                            className={`w-6 h-6 rounded-full ${c.bg} hover:ring-2 hover:ring-offset-1 hover:ring-gray-400 transition-all ${
-                              color.key === c.key ? 'ring-2 ring-offset-1 ring-gray-600' : ''
-                            }`}
-                            onClick={() => handleColorChange(project.id, c.key)}
-                            title={c.key}
-                          />
-                        ))}
-                      </div>
-                    </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* 스케줄 표시 */}
+          <div className="flex items-center gap-2 mb-2 mt-4 pt-4 border-t border-gray-200">
+            <Users className="w-4 h-4 text-gray-500" />
+            <h3 className="text-sm font-semibold text-gray-900">스케줄 표시</h3>
+          </div>
+          <div className="space-y-1">
+            {/* 내 스케줄 */}
+            <div
+              className={`flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer ${
+                !showMySchedule ? 'opacity-50' : ''
+              }`}
+              onClick={() => setShowMySchedule(!showMySchedule)}
+            >
+              <div
+                className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center text-[10px] font-bold text-white"
+              >
+                {member?.name?.charAt(0)}
+              </div>
+              <span className="flex-1 text-gray-900 truncate text-xs font-medium">
+                {member?.name} (나)
+              </span>
+              {showMySchedule ? (
+                <Eye className="w-3.5 h-3.5 text-gray-400" />
+              ) : (
+                <EyeOff className="w-3.5 h-3.5 text-gray-300" />
+              )}
+            </div>
+
+            {/* 팀원 스케줄 */}
+            {teamMembers.map((tm) => {
+              const color = getMemberColor(tm.id);
+              const isVisible = visibleMembers[tm.id];
+              return (
+                <div
+                  key={tm.id}
+                  className={`flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer ${
+                    !isVisible ? 'opacity-50' : ''
+                  }`}
+                  onClick={() => toggleMemberVisibility(tm.id)}
+                >
+                  <div
+                    className={`w-4 h-4 rounded-full ${color.bg} flex items-center justify-center text-[10px] font-bold ${color.text}`}
+                    style={{ backgroundColor: color.hex }}
+                  >
+                    {tm.name?.charAt(0)}
+                  </div>
+                  <span className="flex-1 text-gray-900 truncate text-xs">
+                    {tm.name}
+                  </span>
+                  {isVisible ? (
+                    <Eye className="w-3.5 h-3.5 text-gray-400" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5 text-gray-300" />
                   )}
                 </div>
               );
             })}
           </div>
-
-          {completedProjects.length > 0 && (
-            <>
-              <h3 className="text-sm font-semibold text-gray-900 mt-4 mb-2">종료된 프로젝트</h3>
-              <div className="space-y-1">
-                {completedProjects.slice(0, 5).map((project) => {
-                  const color = getProjectColor(project.id);
-                  return (
-                    <div
-                      key={project.id}
-                      className="flex items-center gap-2 text-sm hover:bg-gray-50 p-2 rounded-lg transition-colors cursor-pointer opacity-60"
-                      onClick={() => toggleProjectVisibility(project.id)}
-                    >
-                      <div className={`w-3 h-3 rounded ${color.bg}`} />
-                      <span className="flex-1 text-gray-500 truncate text-xs">{project.name}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
         </div>
       </div>
 
@@ -1236,7 +1399,14 @@ export default function SchedulesPage() {
                       {positionedSchedules.map(({ schedule, column, totalColumns }) => {
                         const pos = getSchedulePosition(schedule);
                         const project = projects.find((p) => p.id === schedule.project_id);
-                        const color = getProjectColor(schedule.project_id);
+                        const isOwnSchedule = schedule.member_id === member?.id;
+                        const scheduleMember = !isOwnSchedule ? teamMembers.find((m) => m.id === schedule.member_id) : null;
+
+                        // 본인 스케줄은 파란색, 다른 사람은 멤버 색상
+                        const color = isOwnSchedule
+                          ? { bg: 'bg-blue-500', text: 'text-white', hex: '#3b82f6' }
+                          : getMemberColor(schedule.member_id);
+
                         const width = 100 / totalColumns;
                         const left = column * width;
                         const isBeingDragged = isDragging && dragScheduleId === schedule.id;
@@ -1246,7 +1416,7 @@ export default function SchedulesPage() {
                             key={schedule.id}
                             data-schedule-block
                             data-schedule-id={schedule.id}
-                            className={`absolute rounded-lg ${color.bg} ${color.text} shadow-sm cursor-pointer hover:shadow-md z-10 ${
+                            className={`absolute rounded-lg ${color.bg || ''} ${color.text} shadow-sm hover:shadow-md z-10 cursor-pointer border-2 border-white ${
                               isBeingDragged ? 'opacity-30' : ''
                             }`}
                             style={{
@@ -1254,49 +1424,85 @@ export default function SchedulesPage() {
                               height: pos.height,
                               left: `calc(${left}% + 2px)`,
                               width: `calc(${width}% - 4px)`,
+                              ...(color.hex ? { backgroundColor: color.hex } : {}),
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
-                              // 드래그가 발생하지 않았을 때만 모달 열기
-                              if (!dragRef.current.hasDragged) {
+                              if (dragRef.current.hasDragged) return;
+
+                              if (isOwnSchedule) {
+                                // 본인 스케줄은 편집 모달
                                 openEditModal(schedule, day);
+                              } else if (scheduleMember) {
+                                // 다른 팀원 스케줄은 보기 모달
+                                setViewingSchedule({
+                                  schedule,
+                                  member: scheduleMember,
+                                  project: project || null,
+                                });
+                              }
+                            }}
+                            onContextMenu={(e) => {
+                              // 본인 스케줄만 우클릭 메뉴
+                              if (isOwnSchedule) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setContextMenu({
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                  scheduleId: schedule.id,
+                                });
                               }
                             }}
                           >
-                            {/* 상단 리사이즈 핸들 */}
-                            <div
-                              className="absolute top-0 left-0 right-0 h-2 cursor-n-resize hover:bg-black/10 rounded-t-lg"
-                              onMouseDown={(e) => handleDragStart(e, schedule.id, 'resize-top')}
-                            />
+                            {/* 상단 리사이즈 핸들 - 본인 스케줄만 */}
+                            {isOwnSchedule && (
+                              <div
+                                className="absolute top-0 left-0 right-0 h-2 cursor-n-resize hover:bg-black/10 rounded-t-lg"
+                                onMouseDown={(e) => handleDragStart(e, schedule.id, 'resize-top')}
+                              />
+                            )}
 
                             {/* 내용 */}
                             <div
-                              className="p-2 h-full overflow-hidden cursor-move"
-                              onMouseDown={(e) => handleDragStart(e, schedule.id, 'move')}
+                              className={`p-1.5 h-full overflow-hidden ${isOwnSchedule ? 'cursor-move' : ''}`}
+                              onMouseDown={isOwnSchedule ? (e) => handleDragStart(e, schedule.id, 'move') : undefined}
+                              title={`${!isOwnSchedule ? `[${scheduleMember?.name}] ` : ''}${project?.name || '기타'}\n${(schedule as any).start_time} - ${(schedule as any).end_time}\n${Math.floor(schedule.minutes / 60)}시간 ${schedule.minutes % 60 > 0 ? `${schedule.minutes % 60}분` : ''}${(schedule as any).description ? `\n${(schedule as any).description}` : ''}`}
                             >
-                              <div className="text-sm font-semibold truncate">
-                                {project?.name}
-                              </div>
-                              <div className="text-xs font-medium mt-1 opacity-90">
-                                {(schedule as any).start_time} - {(schedule as any).end_time}
-                              </div>
-                              {pos.height >= 80 && (
-                                <div className="text-xs mt-1 opacity-75">
-                                  {Math.floor(schedule.minutes / 60)}시간 {schedule.minutes % 60 > 0 ? `${schedule.minutes % 60}분` : ''}
-                                </div>
-                              )}
-                              {pos.height >= 100 && (schedule as any).description && (
-                                <div className="text-xs mt-1 opacity-75 line-clamp-2">
-                                  {(schedule as any).description}
+                              {pos.height >= 45 ? (
+                                <>
+                                  {/* 다른 팀원 스케줄이면 이름 표시 */}
+                                  {!isOwnSchedule && (
+                                    <div className="text-[10px] font-bold opacity-90 truncate leading-tight">
+                                      {scheduleMember?.name}
+                                    </div>
+                                  )}
+                                  <div className="text-xs font-semibold truncate leading-tight">
+                                    {project?.name || '기타'}
+                                  </div>
+                                  <div className="text-[10px] font-medium opacity-90 leading-tight">
+                                    {(schedule as any).start_time} - {(schedule as any).end_time}
+                                  </div>
+                                  {(schedule as any).description && (
+                                    <div className="text-[10px] opacity-75 truncate leading-tight">
+                                      {(schedule as any).description}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="text-[10px] font-semibold truncate leading-tight">
+                                  {!isOwnSchedule ? `${scheduleMember?.name}: ` : ''}{(schedule as any).description || project?.name || '기타'}
                                 </div>
                               )}
                             </div>
 
-                            {/* 하단 리사이즈 핸들 */}
-                            <div
-                              className="absolute bottom-0 left-0 right-0 h-2 cursor-s-resize hover:bg-black/10 rounded-b-lg"
-                              onMouseDown={(e) => handleDragStart(e, schedule.id, 'resize-bottom')}
-                            />
+                            {/* 하단 리사이즈 핸들 - 본인 스케줄만 */}
+                            {isOwnSchedule && (
+                              <div
+                                className="absolute bottom-0 left-0 right-0 h-2 cursor-s-resize hover:bg-black/10 rounded-b-lg"
+                                onMouseDown={(e) => handleDragStart(e, schedule.id, 'resize-bottom')}
+                              />
+                            )}
                           </div>
                         );
                       })}
@@ -1346,13 +1552,18 @@ export default function SchedulesPage() {
                           <div className="mt-1 space-y-0.5">
                             {daySchedules.slice(0, 2).map((schedule) => {
                               const project = projects.find((p) => p.id === schedule.project_id);
-                              const color = getProjectColor(schedule.project_id);
+                              const isOwnSchedule = schedule.member_id === member?.id;
+                              const color = isOwnSchedule
+                                ? { bg: 'bg-blue-500', text: 'text-white', hex: '#3b82f6' }
+                                : getMemberColor(schedule.member_id);
+                              const scheduleMember = !isOwnSchedule ? teamMembers.find((m) => m.id === schedule.member_id) : null;
                               return (
                                 <div
                                   key={schedule.id}
-                                  className={`text-xs truncate px-1 py-0.5 rounded ${color.bg} ${color.text}`}
+                                  className={`text-xs truncate px-1 py-0.5 rounded ${color.bg || ''} ${color.text}`}
+                                  style={color.hex ? { backgroundColor: color.hex } : undefined}
                                 >
-                                  {project?.name}
+                                  {!isOwnSchedule && scheduleMember ? `${scheduleMember.name}: ` : ''}{project?.name || '기타'}
                                 </div>
                               );
                             })}
@@ -1386,13 +1597,14 @@ export default function SchedulesPage() {
                         return (
                           <div
                             key={`${project.id}-${barIdx}`}
-                            className={`absolute ${color.bg} rounded px-2 py-0.5 text-xs font-medium ${color.text} shadow-sm pointer-events-auto cursor-pointer hover:shadow-md transition-shadow overflow-hidden`}
+                            className={`absolute ${color.bg || ''} rounded px-2 py-0.5 text-xs font-medium ${color.text} shadow-sm pointer-events-auto cursor-pointer hover:shadow-md transition-shadow overflow-hidden`}
                             style={{
                               top: `${bar.row * 6.5 + 1.75 + layer * barHeight}rem`,
                               left: `${bar.col * 14.285}%`,
                               width: `${bar.width * 14.285}%`,
                               height: `${barHeight}rem`,
                               zIndex: 10 + layer,
+                              ...(color.hex ? { backgroundColor: color.hex } : {}),
                             }}
                             title={`${project.name}\n${format(new Date(project.start_date), 'yyyy/MM/dd')} ~ ${format(new Date(project.end_date), 'yyyy/MM/dd')}`}
                           >
@@ -1441,7 +1653,7 @@ export default function SchedulesPage() {
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
                         <select
-                          value={entry.projectId}
+                          value={entry.projectId ?? ''}
                           onChange={(e) => {
                             const newEntries = [...scheduleEntries];
                             newEntries[index].projectId = e.target.value;
@@ -1449,12 +1661,13 @@ export default function SchedulesPage() {
                           }}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
-                          <option value="">프로젝트 선택</option>
+                          <option value="__none__" disabled>프로젝트를 선택해주세요</option>
                           {myActiveProjects.map((project) => (
                             <option key={project.id} value={project.id}>
                               {project.name}
                             </option>
                           ))}
+                          <option value="">기타</option>
                         </select>
                       </div>
                       <button
@@ -1556,7 +1769,7 @@ export default function SchedulesPage() {
                           newEntries[index].description = e.target.value;
                           setScheduleEntries(newEntries);
                         }}
-                        placeholder="수행한 업무 내용을 입력하세요"
+                        placeholder="업무내용을 입력하세요"
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                         rows={2}
                       />
@@ -1620,18 +1833,189 @@ export default function SchedulesPage() {
             left: dragPreview.left,
             width: dragPreview.width,
             height: dragPreview.height,
-            backgroundColor: getProjectColor(
-              schedules.find((s) => s.id === dragScheduleId)?.project_id || ''
-            ).hex || '#3b82f6',
+            backgroundColor: '#3b82f6',
             opacity: 0.9,
           }}
         >
           <div className="p-2 text-white h-full overflow-hidden">
             <div className="text-sm font-semibold truncate">
-              {projects.find((p) => p.id === schedules.find((s) => s.id === dragScheduleId)?.project_id)?.name}
+              {projects.find((p) => p.id === schedules.find((s) => s.id === dragScheduleId)?.project_id)?.name || '기타'}
             </div>
             <div className="text-xs font-medium mt-1 opacity-90">
               {dragPreview.startTime} - {dragPreview.endTime}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 알림 모달 */}
+      {alertMessage && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <p className="text-gray-800 font-medium">{alertMessage}</p>
+            </div>
+            <div className="border-t border-gray-100 p-4">
+              <button
+                onClick={() => setAlertMessage(null)}
+                className="w-full py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 팀원 스케줄 보기 모달 */}
+      {viewingSchedule && (
+        <div
+          className="fixed inset-0 bg-black/30 flex items-center justify-center z-[60]"
+          onClick={() => setViewingSchedule(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 헤더 - 멤버 색상 */}
+            <div
+              className="px-5 py-4"
+              style={{ backgroundColor: getMemberColor(viewingSchedule.member.id).hex }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                  {viewingSchedule.member.name?.charAt(0)}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-white font-semibold text-lg">{viewingSchedule.member.name}</h3>
+                  <p className="text-white/80 text-sm">
+                    {format(new Date(viewingSchedule.schedule.date), 'M월 d일 (EEEE)', { locale: ko })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setViewingSchedule(null)}
+                  className="p-1.5 text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* 내용 */}
+            <div className="p-5 space-y-4">
+              {/* 프로젝트 */}
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">프로젝트</p>
+                  <p className="text-gray-900 font-medium">{viewingSchedule.project?.name || '기타'}</p>
+                </div>
+              </div>
+
+              {/* 시간 */}
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">시간</p>
+                  <p className="text-gray-900 font-medium">
+                    {(viewingSchedule.schedule as any).start_time} - {(viewingSchedule.schedule as any).end_time}
+                    <span className="text-gray-500 text-sm ml-2">
+                      ({Math.floor(viewingSchedule.schedule.minutes / 60)}시간
+                      {viewingSchedule.schedule.minutes % 60 > 0 ? ` ${viewingSchedule.schedule.minutes % 60}분` : ''})
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {/* 업무 내용 */}
+              {(viewingSchedule.schedule as any).description && (
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs text-gray-500">업무 내용</p>
+                    <p className="text-gray-900">{(viewingSchedule.schedule as any).description}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 닫기 버튼 */}
+            <div className="border-t border-gray-100 p-4">
+              <button
+                onClick={() => setViewingSchedule(null)}
+                className="w-full py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 우클릭 컨텍스트 메뉴 */}
+      {contextMenu && (
+        <div
+          className="fixed bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-[70] min-w-[120px]"
+          style={{
+            top: contextMenu.y,
+            left: contextMenu.x,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+            onClick={() => {
+              setDeleteConfirm(contextMenu.scheduleId);
+              setContextMenu(null);
+            }}
+          >
+            <Trash2 className="w-4 h-4" />
+            삭제
+          </button>
+        </div>
+      )}
+
+      {/* 삭제 확인 모달 */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">스케줄 삭제</h3>
+              <p className="text-gray-600">이 스케줄을 삭제하시겠습니까?</p>
+            </div>
+            <div className="flex border-t border-gray-100">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-3 text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => handleDeleteSchedule(deleteConfirm)}
+                className="flex-1 py-3 text-red-600 hover:bg-red-50 transition-colors font-medium border-l border-gray-100"
+              >
+                삭제
+              </button>
             </div>
           </div>
         </div>

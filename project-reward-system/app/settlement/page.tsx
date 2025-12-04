@@ -402,8 +402,6 @@ export default function SettlementPage() {
         </table>
       </div>
 
-      <p className="mt-4 text-sm text-gray-600">* 모든 금액은 부가세 별도 기준입니다.</p>
-
       {/* Receipt Modal */}
       {showReceiptModal && (
         <ReceiptModal

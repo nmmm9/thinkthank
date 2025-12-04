@@ -12,6 +12,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const initialized = useRef(false);
 
   const isLoginPage = pathname === '/login';
+  const isInvitePage = pathname?.startsWith('/invite');
 
   // 앱 시작 시 세션 복원
   useEffect(() => {
@@ -32,8 +33,8 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, isLoading, isLoginPage, router]);
 
-  // 로그인 페이지는 항상 표시
-  if (isLoginPage) {
+  // 로그인 페이지, 초대 페이지는 항상 표시
+  if (isLoginPage || isInvitePage) {
     return <>{children}</>;
   }
 

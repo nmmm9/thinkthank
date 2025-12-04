@@ -84,6 +84,22 @@ CREATE TABLE public.organizations (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT organizations_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.performance_comments (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  org_id uuid NOT NULL,
+  project_id uuid NOT NULL,
+  member_id uuid NOT NULL,
+  author_id uuid NOT NULL,
+  content text NOT NULL,
+  is_read boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT performance_comments_pkey PRIMARY KEY (id),
+  CONSTRAINT performance_comments_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id),
+  CONSTRAINT performance_comments_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id),
+  CONSTRAINT performance_comments_member_id_fkey FOREIGN KEY (member_id) REFERENCES public.members(id),
+  CONSTRAINT performance_comments_author_id_fkey FOREIGN KEY (author_id) REFERENCES public.members(id)
+);
 CREATE TABLE public.project_categories (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   org_id uuid NOT NULL,
