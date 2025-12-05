@@ -6,6 +6,7 @@ import type { Project, Schedule, Member, Opex } from '@/lib/supabase/database.ty
 import { startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { ArrowRight, Star } from 'lucide-react';
+import { useAuthStore } from '@/lib/auth-store';
 
 // 확장된 프로젝트 타입 (관계 데이터 포함)
 interface ProjectWithRelations extends Project {
@@ -25,6 +26,7 @@ interface ScheduleWithRelations extends Schedule {
 }
 
 export default function Dashboard() {
+  const { member } = useAuthStore();
   const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
   const [schedules, setSchedules] = useState<ScheduleWithRelations[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -337,9 +339,10 @@ export default function Dashboard() {
               ))}
 
               {calendarDays.map((day) => {
+                // 본인 스케줄만 필터링
                 const daySchedules = schedules.filter((s) => {
                   const scheduleDate = new Date(s.date);
-                  return format(scheduleDate, 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd');
+                  return s.member_id === member?.id && format(scheduleDate, 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd');
                 });
 
                 const hasSchedule = daySchedules.length > 0;
