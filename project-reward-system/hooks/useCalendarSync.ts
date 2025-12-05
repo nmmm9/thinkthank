@@ -223,8 +223,11 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
         failedMonths: [],
       });
 
+      console.log(`[HistorySync] Starting sync for ${months.length} months`);
+
       // 월별로 동기화
-      for (const { year, month } of months) {
+      for (let i = 0; i < months.length; i++) {
+        const { year, month } = months[i];
         // 시작일: 해당 월 1일
         const startStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
         // 종료일: 다음 월 1일 (timeMax는 exclusive라서 다음 달 1일로 설정해야 해당 월 전체 포함)
@@ -233,6 +236,8 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
         const actualNextMonth = nextMonth > 11 ? 0 : nextMonth;
         const endStr = `${nextYear}-${String(actualNextMonth + 1).padStart(2, '0')}-01`;
         const periodStr = `${year}년 ${month + 1}월`;
+
+        console.log(`[HistorySync] Processing ${i + 1}/${months.length}: ${periodStr} (${startStr} ~ ${endStr})`);
 
         setHistorySyncProgress((prev) => ({
           ...prev!,
@@ -257,26 +262,29 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
             }),
           });
 
+          console.log(`[HistorySync] ${periodStr}: Response status ${response.status}`);
+
           // 응답이 성공적이지 않으면 에러 처리
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
 
           const data = await response.json();
+          console.log(`[HistorySync] ${periodStr}: Data received`, data.stats);
 
           if (data.error) {
-            console.error(`Sync error for ${periodStr}:`, data.error);
+            console.error(`[HistorySync] Sync error for ${periodStr}:`, data.error);
             failedMonths.push(`${periodStr} (${data.error})`);
           } else {
             // fetched (가져온 수) 카운트
             const fetched = data.stats?.fetched || 0;
             const created = data.stats?.created || 0;
             totalEvents += fetched;
-            console.log(`${periodStr}: ${fetched}개 가져옴, ${created}개 생성`);
+            console.log(`[HistorySync] ${periodStr}: ${fetched}개 가져옴, ${created}개 생성`);
           }
         } catch (fetchError: any) {
           // 네트워크 오류, 타임아웃, JSON 파싱 오류 등
-          console.error(`Failed to sync ${periodStr}:`, fetchError);
+          console.error(`[HistorySync] Failed to sync ${periodStr}:`, fetchError);
           failedMonths.push(`${periodStr} (${fetchError.message || '연결 오류'})`);
           // 계속 다음 월 진행
         }
@@ -294,6 +302,8 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
+      console.log(`[HistorySync] Completed! Total: ${totalEvents} events, Failed months: ${failedMonths.length}`);
+
       setHistorySyncProgress({
         isRunning: false,
         currentPeriod: '완료',
@@ -305,7 +315,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
 
       onSyncComplete?.();
     } catch (error: any) {
-      console.error('History sync failed:', error);
+      console.error('[HistorySync] Fatal error:', error);
       setHistorySyncProgress((prev) => ({
         ...prev!,
         isRunning: false,
