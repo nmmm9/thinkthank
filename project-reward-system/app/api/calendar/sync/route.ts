@@ -137,13 +137,13 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
     // 4. Google Calendar에서 이벤트 가져오기
     // syncToken 증분 동기화 대신 항상 전체 동기화 (삭제 감지 안정성을 위해)
     const now = new Date();
-    const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
     const threeMonthsLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
+    // 페이지네이션으로 전체 이벤트 가져오기 (제한 없음)
     const calendarEvents = await getCalendarEvents(accessToken, calendarId, {
-      timeMin: threeMonthsAgo.toISOString(),
+      timeMin: oneYearAgo.toISOString(),
       timeMax: threeMonthsLater.toISOString(),
-      maxResults: 500,
     });
 
     // 5. 기존 스케줄 가져오기
@@ -151,7 +151,7 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
       .from('schedules')
       .select('*')
       .eq('member_id', memberId)
-      .gte('date', threeMonthsAgo.toISOString().split('T')[0])
+      .gte('date', oneYearAgo.toISOString().split('T')[0])
       .lte('date', threeMonthsLater.toISOString().split('T')[0]);
 
     const scheduleByGoogleId = new Map(

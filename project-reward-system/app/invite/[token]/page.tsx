@@ -30,17 +30,10 @@ export default function InvitePage() {
   useEffect(() => {
     const fetchInvitation = async () => {
       try {
+        // 초대 정보 가져오기
         const { data, error: fetchError } = await (supabase
           .from('invitations') as any)
-          .select(`
-            id,
-            email,
-            role,
-            org_id,
-            expires_at,
-            accepted_at,
-            organization:organizations(name)
-          `)
+          .select('id, email, role, org_id, expires_at, accepted_at')
           .eq('token', token)
           .single();
 
@@ -61,7 +54,17 @@ export default function InvitePage() {
           return;
         }
 
-        setInvitation(data);
+        // 조직 정보 별도 조회
+        const { data: orgData } = await (supabase
+          .from('organizations') as any)
+          .select('name')
+          .eq('id', data.org_id)
+          .single();
+
+        setInvitation({
+          ...data,
+          organization: orgData || { name: '조직' },
+        });
       } catch (err) {
         console.error('Fetch invitation error:', err);
         setError('초대 정보를 불러오는 중 오류가 발생했습니다.');

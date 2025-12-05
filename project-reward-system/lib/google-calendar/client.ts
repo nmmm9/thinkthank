@@ -66,7 +66,7 @@ export async function getCalendarList(accessToken: string): Promise<GoogleCalend
   return response.json();
 }
 
-// 이벤트 목록 가져오기
+// 이벤트 목록 가져오기 (페이지네이션으로 전체 가져오기)
 export async function getCalendarEvents(
   accessToken: string,
   calendarId: string,
@@ -77,38 +77,67 @@ export async function getCalendarEvents(
     maxResults?: number;
   }
 ): Promise<GoogleCalendarEventsResponse> {
-  const params = new URLSearchParams();
+  const allItems: GoogleCalendarEvent[] = [];
+  let pageToken: string | undefined;
+  let nextSyncToken: string | undefined;
 
-  if (options?.syncToken) {
-    params.append('syncToken', options.syncToken);
-    // syncToken 사용 시 삭제된 이벤트도 포함
-    params.append('showDeleted', 'true');
-    params.append('singleEvents', 'true');
-    // syncToken + showDeleted 사용 시 orderBy는 사용하지 않음
-  } else {
-    if (options?.timeMin) params.append('timeMin', options.timeMin);
-    if (options?.timeMax) params.append('timeMax', options.timeMax);
-    params.append('singleEvents', 'true');
-    params.append('orderBy', 'startTime');
-  }
+  do {
+    const params = new URLSearchParams();
 
-  if (options?.maxResults) params.append('maxResults', options.maxResults.toString());
-
-  const response = await fetch(
-    `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+    if (options?.syncToken) {
+      params.append('syncToken', options.syncToken);
+      params.append('showDeleted', 'true');
+      params.append('singleEvents', 'true');
+    } else {
+      if (options?.timeMin) params.append('timeMin', options.timeMin);
+      if (options?.timeMax) params.append('timeMax', options.timeMax);
+      params.append('singleEvents', 'true');
+      params.append('orderBy', 'startTime');
     }
-  );
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error?.message || 'Failed to fetch calendar events');
-  }
+    // 페이지당 최대 2500개 (Google API 최대값)
+    params.append('maxResults', '2500');
 
-  return response.json();
+    if (pageToken) {
+      params.append('pageToken', pageToken);
+    }
+
+    const response = await fetch(
+      `${GOOGLE_CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Failed to fetch calendar events');
+    }
+
+    const data: GoogleCalendarEventsResponse = await response.json();
+
+    // 이벤트 누적
+    if (data.items) {
+      allItems.push(...data.items);
+    }
+
+    // 다음 페이지 토큰 저장
+    pageToken = data.nextPageToken;
+    nextSyncToken = data.nextSyncToken;
+
+    // API 제한 방지를 위해 다음 페이지 요청 전 100ms 대기
+    if (pageToken) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+  } while (pageToken); // 다음 페이지가 있으면 계속
+
+  return {
+    items: allItems,
+    nextSyncToken,
+  };
 }
 
 // 이벤트 생성
