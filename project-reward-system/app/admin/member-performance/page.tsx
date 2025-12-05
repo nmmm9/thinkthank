@@ -170,8 +170,11 @@ export default function MemberPerformancePage() {
           const plannedInvestment = dailyTotalCost * plannedDays;
           const actualInvestment = dailyTotalCost * actualDays;
 
-          const savedDays = plannedDays - actualDays;
-          const efficiencyRate = plannedDays > 0 ? (savedDays / plannedDays) * 100 : 0;
+          // 반올림된 값으로 계산 (표시값과 일치시키기 위해)
+          const roundedPlannedDays = Number(Number(plannedDays).toFixed(1));
+          const roundedActualDays = Number(actualDays.toFixed(1));
+          const roundedSavedDays = Number((roundedPlannedDays - roundedActualDays).toFixed(1));
+          const efficiencyRate = roundedPlannedDays > 0 ? (roundedSavedDays / roundedPlannedDays) * 100 : 0;
 
           // 배분금액 계산
           const contractAmount = project.contract_amount || 0;
@@ -185,8 +188,6 @@ export default function MemberPerformancePage() {
             const mActualMinutes = mSchedules.reduce((sum, s) => sum + s.minutes, 0);
             const mActualDays = mActualMinutes / 480;
             const mPlannedDays = a.planned_days || 0;
-            const mSavedDays = mPlannedDays - mActualDays;
-            const mEfficiency = mPlannedDays > 0 ? (mSavedDays / mPlannedDays) * 100 : 0;
 
             const mStartDate = a.start_date || project.start_date;
             const mYearMonth = getYearMonthFromDate(mStartDate);
@@ -199,37 +200,56 @@ export default function MemberPerformancePage() {
             const mDailyOpex = mWorkingDays > 0 ? (mAdminExpense * mSalaryRatio) / mWorkingDays : 0;
             const mDailyCost = mWorkingDays > 0 ? (m.annual_salary / 12) / mWorkingDays : 0;
             const mDailyTotalCost = mDailyCost + mDailyOpex;
+            const mPlannedInvestment = mDailyTotalCost * mPlannedDays;
             const mActualInvestment = mDailyTotalCost * mActualDays;
+            // 절약한 비용 및 효율 계산 (반올림된 값 사용)
+            const mSavedCost = mPlannedInvestment - mActualInvestment;
+            const mRoundedPlannedDays = Number(Number(mPlannedDays).toFixed(1));
+            const mRoundedActualDays = Number(mActualDays.toFixed(1));
+            const mRoundedSavedDays = Number((mRoundedPlannedDays - mRoundedActualDays).toFixed(1));
+            const mEfficiencyRate = mRoundedPlannedDays > 0 ? (mRoundedSavedDays / mRoundedPlannedDays) * 100 : 0;
 
             return {
               memberId: m.id,
-              efficiency: mEfficiency,
+              savedCost: mSavedCost,
               actualInvestment: mActualInvestment,
+              efficiencyRate: mEfficiencyRate,
             };
           }).filter((p: any) => p !== null);
 
           const totalActualInvestment = allMemberPerfs.reduce((sum: number, p: any) => sum + p.actualInvestment, 0);
+          const totalPlannedInvestment = allMemberPerfs.reduce((sum: number, p: any) => {
+            const perf = allMemberPerfs.find((mp: any) => mp.memberId === p.memberId);
+            return sum + (perf ? perf.savedCost + perf.actualInvestment : 0);
+          }, 0);
           const actualPerformance = contractAmount - totalActualInvestment;
+          const plannedPerformance = contractAmount - totalPlannedInvestment;
+          const performanceDiff = actualPerformance - plannedPerformance;
 
+          // 회사/팀 배분 비율
           const companySharePercent = (project as any).company_share_percent ?? 80;
           const teamSharePercent = 100 - companySharePercent;
-          const teamShare = actualPerformance > 0 ? Math.round(actualPerformance * teamSharePercent / 100) : 0;
 
-          // 효율성 기반 배분
-          const efficientMembers = allMemberPerfs.filter((p: any) => p.efficiency > 0);
-          const totalEfficiency = efficientMembers.reduce((sum: number, p: any) => sum + p.efficiency, 0);
+          // 예상 대비 추가 성과 (빨리 끝내서 생긴 이익)
+          // performanceDiff를 회사/팀원 비율로 먼저 분배
+          const bonusPoolTotal = performanceDiff > 0 ? performanceDiff : 0;
+          const teamBonusPool = Math.round(bonusPoolTotal * teamSharePercent / 100);
+
+          // 효율 기반 배분
+          const efficientMembers = allMemberPerfs.filter((p: any) => p.efficiencyRate > 0);
+          const totalEfficiencyRate = efficientMembers.reduce((sum: number, p: any) => sum + p.efficiencyRate, 0);
 
           let shareAmount = 0;
-          if (efficiencyRate > 0 && totalEfficiency > 0) {
-            const sharePercent = (efficiencyRate / totalEfficiency) * 100;
-            shareAmount = Math.round(teamShare * sharePercent / 100);
+          if (efficiencyRate > 0 && totalEfficiencyRate > 0 && teamBonusPool > 0) {
+            const sharePercent = (efficiencyRate / totalEfficiencyRate) * 100;
+            shareAmount = Math.round(teamBonusPool * sharePercent / 100);
           }
 
           return {
             project,
-            plannedDays,
-            actualDays: Math.round(actualDays * 10) / 10,
-            savedDays: Math.round(savedDays * 10) / 10,
+            plannedDays: roundedPlannedDays,
+            actualDays: roundedActualDays,
+            savedDays: roundedSavedDays,
             efficiencyRate: Math.round(efficiencyRate * 10) / 10,
             shareAmount,
           };

@@ -244,8 +244,14 @@ export default function PerformancePage() {
     const plannedInvestment = dailyTotalCost * plannedDays;
     const actualInvestment = dailyTotalCost * actualDays;
 
-    const savedDays = plannedDays - actualDays;
-    const efficiencyRate = plannedDays > 0 ? (savedDays / plannedDays) * 100 : 0;
+    // 반올림된 값으로 계산 (표시값과 일치시키기 위해)
+    const roundedPlannedDays = Number(Number(plannedDays).toFixed(1));
+    const roundedActualDays = Number(actualDays.toFixed(1));
+    const roundedSavedDays = Number((roundedPlannedDays - roundedActualDays).toFixed(1));
+    const efficiencyRate = roundedPlannedDays > 0 ? (roundedSavedDays / roundedPlannedDays) * 100 : 0;
+
+    // 절약한 비용 계산 (예상투입비 - 실제투입비)
+    const savedCost = plannedInvestment - actualInvestment;
 
     return {
       memberId: member.id,
@@ -253,12 +259,13 @@ export default function PerformancePage() {
       dailyCost: Math.round(dailyCost),
       dailyOpex: Math.round(dailyOpex),
       dailyTotalCost: Math.round(dailyTotalCost),
-      plannedDays: Number(Number(plannedDays).toFixed(1)),
-      actualDays: Number(actualDays.toFixed(1)),
-      savedDays: Number(savedDays.toFixed(1)),
+      plannedDays: roundedPlannedDays,
+      actualDays: roundedActualDays,
+      savedDays: roundedSavedDays,
       efficiencyRate: Number(efficiencyRate.toFixed(1)),
       plannedInvestment: Math.round(plannedInvestment),
       actualInvestment: Math.round(actualInvestment),
+      savedCost: Math.round(savedCost), // 절약한 비용 추가
     };
   };
 
@@ -282,23 +289,34 @@ export default function PerformancePage() {
       const actualPerformance = contractAmount - actualInvestment;
       const performanceDiff = actualPerformance - plannedPerformance;
 
+      // 회사/팀 배분 비율
       const companySharePercent = (project as any).company_share_percent ?? 80;
       const teamSharePercent = 100 - companySharePercent;
 
-      const companyShare = actualPerformance > 0 ? Math.round(actualPerformance * companySharePercent / 100) : 0;
-      const teamShare = actualPerformance > 0 ? Math.round(actualPerformance * teamSharePercent / 100) : 0;
+      // 예상 대비 추가 성과 (빨리 끝내서 생긴 이익)
+      // performanceDiff를 회사/팀원 비율로 먼저 분배
+      const bonusPoolTotal = performanceDiff > 0 ? performanceDiff : 0;
+      const companyBonusShare = Math.round(bonusPoolTotal * companySharePercent / 100);
+      const teamBonusPool = Math.round(bonusPoolTotal * teamSharePercent / 100);
 
+      // 효율이 양수인 멤버들 (예상보다 빨리 끝낸 사람)
       const efficientMembers = memberPerfs.filter((p: any) => p.efficiencyRate > 0);
       const totalEfficiencyRate = efficientMembers.reduce((sum: number, p: any) => sum + p.efficiencyRate, 0);
 
+      // 효율 비율로 성과금 배분 (팀원 몫에서)
       const memberShares = memberPerfs.map((perf: any) => {
-        if (perf.efficiencyRate <= 0 || totalEfficiencyRate === 0) {
+        if (perf.efficiencyRate <= 0 || totalEfficiencyRate === 0 || teamBonusPool === 0) {
           return { ...perf, shareAmount: 0, sharePercent: 0 };
         }
+        // 효율 비율로 배분
         const sharePercent = (perf.efficiencyRate / totalEfficiencyRate) * 100;
-        const shareAmount = Math.round(teamShare * sharePercent / 100);
+        const shareAmount = Math.round(teamBonusPool * sharePercent / 100);
         return { ...perf, shareAmount, sharePercent: Math.round(sharePercent * 10) / 10 };
       });
+
+      // 회사/팀 배분 표시용
+      const companyShare = companyBonusShare; // 예상 대비 추가 성과 중 회사 몫
+      const teamShare = teamBonusPool; // 예상 대비 추가 성과 중 팀원 몫
 
       return {
         project,
@@ -509,7 +527,7 @@ export default function PerformancePage() {
                   {/* 프로젝트 요약 - 관리자만 전체 정보 표시 */}
                   {isAdmin ? (
                     <>
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                         <div className="bg-white rounded-lg p-4 border border-gray-200">
                           <div className="text-sm text-gray-600 mb-1">계약금</div>
                           <div className="text-xl font-bold text-gray-900">
@@ -542,8 +560,14 @@ export default function PerformancePage() {
                           <div className={`text-xl font-bold ${actualPerformance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
                             {actualPerformance.toLocaleString()}원
                           </div>
-                          <div className={`text-xs mt-1 ${performanceDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            예상 대비 {performanceDiff >= 0 ? '+' : ''}{performanceDiff.toLocaleString()}원
+                        </div>
+                        <div className={`rounded-lg p-4 border ${performanceDiff > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                          <div className={`text-sm mb-1 ${performanceDiff > 0 ? 'text-green-600' : 'text-gray-600'}`}>예상 대비 추가 성과</div>
+                          <div className={`text-xl font-bold ${performanceDiff > 0 ? 'text-green-600' : 'text-gray-600'}`}>
+                            {performanceDiff > 0 ? '+' : ''}{performanceDiff.toLocaleString()}원
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            분배 대상 금액
                           </div>
                         </div>
                       </div>
