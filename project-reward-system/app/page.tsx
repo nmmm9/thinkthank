@@ -1,12 +1,13 @@
 'use client';
 
 import { useMemo, useCallback, useEffect, useState } from 'react';
-import { getProjects, getSchedules, getMembers, getOpexList } from '@/lib/api';
+import { getProjects, getSchedules, getMembers, getOpexList, toggleProjectStar } from '@/lib/api';
 import type { Project, Schedule, Member, Opex } from '@/lib/supabase/database.types';
-import { startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays } from 'date-fns';
+import { startOfMonth, endOfMonth, startOfYear, endOfYear, isWithinInterval, format, eachDayOfInterval, isToday, differenceInDays, addMonths, subMonths } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { ArrowRight, Star } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth-store';
+import { useRouter } from 'next/navigation';
 
 // 확장된 프로젝트 타입 (관계 데이터 포함)
 interface ProjectWithRelations extends Project {
@@ -27,15 +28,21 @@ interface ScheduleWithRelations extends Schedule {
 
 export default function Dashboard() {
   const { member } = useAuthStore();
+  const router = useRouter();
   const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
   const [schedules, setSchedules] = useState<ScheduleWithRelations[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [calendarDate, setCalendarDate] = useState(new Date());
 
   const today = new Date();
   const monthStart = startOfMonth(today);
   const monthEnd = endOfMonth(today);
+
+  // 달력용 월 시작/끝
+  const calendarMonthStart = startOfMonth(calendarDate);
+  const calendarMonthEnd = endOfMonth(calendarDate);
 
   // 데이터 로드
   useEffect(() => {
@@ -137,23 +144,24 @@ export default function Dashboard() {
   }, [projects, schedules, calculatePerformance]);
 
   const calendarDays = useMemo(() => {
-    return eachDayOfInterval({ start: monthStart, end: monthEnd });
-  }, [monthStart, monthEnd]);
+    return eachDayOfInterval({ start: calendarMonthStart, end: calendarMonthEnd });
+  }, [calendarMonthStart, calendarMonthEnd]);
 
-  const activeProjects = useMemo(() => {
+  // 내가 참여 중인 프로젝트 (allocations에 내 member_id가 있는 프로젝트)
+  const myProjects = useMemo(() => {
+    if (!member?.id) return [];
     return projects.filter((p) => {
       const end = new Date(p.end_date);
-      return end >= today;
-    }).slice(0, 5);
-  }, [projects, today]);
+      const isActive = end >= today;
+      const isMyProject = p.allocations?.some((a: any) => a.member_id === member.id);
+      return isActive && isMyProject;
+    });
+  }, [projects, today, member?.id]);
 
-  const topProjects = useMemo(() => {
+  // 즐겨찾기 프로젝트
+  const starredProjects = useMemo(() => {
     return projects
-      .filter((p) => {
-        const end = new Date(p.end_date);
-        return end >= today;
-      })
-      .slice(0, 3)
+      .filter((p) => p.starred)
       .map((project) => {
         const start = new Date(project.start_date);
         const end = new Date(project.end_date);
@@ -165,6 +173,18 @@ export default function Dashboard() {
         return { ...project, progress, remainingDays };
       });
   }, [projects, today]);
+
+  // 즐겨찾기 토글
+  const handleToggleStar = async (projectId: string, currentStarred: boolean) => {
+    try {
+      await toggleProjectStar(projectId, !currentStarred);
+      setProjects(projects.map(p =>
+        p.id === projectId ? { ...p, starred: !currentStarred } : p
+      ));
+    } catch (error) {
+      console.error('즐겨찾기 토글 실패:', error);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -307,21 +327,27 @@ export default function Dashboard() {
       </div>
 
       {/* 스케줄 & 팀 최신 프로젝트 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        {/* 스케줄 */}
-        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">스케줄</h2>
-          <div className="mb-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-medium text-gray-700">
-                {format(today, 'M월', { locale: ko })} <span className="text-gray-400">{format(today, 'yyyy')}</span>
+      <div className="flex gap-6 mb-8 items-stretch">
+        {/* 스케줄 - 정사각형 */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100 w-[520px] flex-shrink-0">
+          <h2 className="text-base font-semibold text-gray-900 mb-3">스케줄</h2>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-700">
+                {format(calendarDate, 'M월', { locale: ko })} <span className="text-gray-400 text-xs">{format(calendarDate, 'yyyy')}</span>
               </h3>
-              <div className="flex items-center gap-2">
-                <button className="p-1 hover:bg-gray-100 rounded">
-                  <span className="text-gray-600">‹</span>
+              <div className="flex items-center gap-1">
+                <button
+                  className="p-0.5 hover:bg-gray-100 rounded"
+                  onClick={() => setCalendarDate(subMonths(calendarDate, 1))}
+                >
+                  <span className="text-gray-600 text-sm">‹</span>
                 </button>
-                <button className="p-1 hover:bg-gray-100 rounded">
-                  <span className="text-gray-600">›</span>
+                <button
+                  className="p-0.5 hover:bg-gray-100 rounded"
+                  onClick={() => setCalendarDate(addMonths(calendarDate, 1))}
+                >
+                  <span className="text-gray-600 text-sm">›</span>
                 </button>
               </div>
             </div>
@@ -329,12 +355,12 @@ export default function Dashboard() {
             {/* 달력 */}
             <div className="grid grid-cols-7 gap-1">
               {['일', '월', '화', '수', '목', '금', '토'].map((day, idx) => (
-                <div key={idx} className="text-center text-xs font-medium text-gray-500 py-2">
+                <div key={idx} className="text-center text-xs font-medium text-gray-500 py-1">
                   {day}
                 </div>
               ))}
 
-              {Array.from({ length: monthStart.getDay() }).map((_, idx) => (
+              {Array.from({ length: calendarMonthStart.getDay() }).map((_, idx) => (
                 <div key={`empty-${idx}`} className="aspect-square" />
               ))}
 
@@ -351,15 +377,20 @@ export default function Dashboard() {
                 return (
                   <div
                     key={format(day, 'yyyy-MM-dd')}
-                    className={`aspect-square flex items-center justify-center text-sm rounded-lg transition-colors ${
-                      isToday(day)
-                        ? 'bg-blue-500 text-white font-bold'
-                        : hasSchedule
-                        ? 'bg-gray-100 text-gray-900'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
+                    className="aspect-square flex items-center justify-center cursor-pointer"
+                    onClick={() => router.push(`/schedules?date=${format(day, 'yyyy-MM-dd')}`)}
                   >
-                    {dayNum}
+                    <div
+                      className={`w-[70%] h-[70%] flex items-center justify-center text-xs rounded-md transition-colors ${
+                        isToday(day)
+                          ? 'bg-blue-500 text-white font-bold'
+                          : hasSchedule
+                          ? 'bg-gray-100 text-gray-900'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {dayNum}
+                    </div>
                   </div>
                 );
               })}
@@ -367,53 +398,75 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* 팀 최신 프로젝트 */}
-        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+        {/* 팀 최신 프로젝트 - 나머지 공간 채우기 */}
+        <div className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100 flex-1">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">팀 최신 프로젝트</h2>
-            <ArrowRight className="w-5 h-5 text-gray-400" />
+            <h2 className="text-lg font-semibold text-gray-900">내가 참여 중인 프로젝트</h2>
+            <button onClick={() => router.push('/projects')} className="hover:bg-gray-100 rounded-full p-1 transition-colors">
+              <ArrowRight className="w-5 h-5 text-gray-400" />
+            </button>
           </div>
 
-          <div className="space-y-3">
-            {activeProjects.length === 0 ? (
-              <p className="text-gray-500 text-sm py-4 text-center">프로젝트가 없습니다.</p>
+          {/* 테이블 헤더 */}
+          <div className="grid grid-cols-12 gap-4 pb-2 border-b border-gray-100 mb-2">
+            <div className="col-span-3 text-xs font-medium text-gray-500">프로젝트명</div>
+            <div className="col-span-2 text-xs font-medium text-gray-500">현황</div>
+            <div className="col-span-2 text-xs font-medium text-gray-500">남은기간</div>
+            <div className="col-span-5 text-xs font-medium text-gray-500">실행율</div>
+          </div>
+
+          <div className="space-y-1">
+            {myProjects.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4 text-center">참여 중인 프로젝트가 없습니다.</p>
             ) : (
-              activeProjects.map((project) => {
+              myProjects.slice(0, 8).map((project) => {
                 const start = new Date(project.start_date);
                 const end = new Date(project.end_date);
                 const total = differenceInDays(end, start);
                 const elapsed = differenceInDays(today, start);
                 const progress = Math.min(Math.max((elapsed / total) * 100, 0), 100);
+                const remainingDays = differenceInDays(end, today);
+
+                const canManageProject = member?.role === 'admin' || member?.role === 'manager';
 
                 return (
-                  <div key={project.id} className="flex items-center gap-3 py-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-sm font-medium text-gray-900 truncate">
-                          {project.name}
-                        </h3>
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(
-                            project.status
-                          )}`}
-                        >
-                          {getStatusLabel(project.status)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">
-                          {format(start, 'MM.dd')} ~ {format(end, 'MM.dd')}
-                        </span>
-                      </div>
+                  <div
+                    key={project.id}
+                    className={`grid grid-cols-12 gap-4 py-2.5 hover:bg-gray-50 rounded-lg transition-colors ${canManageProject ? 'cursor-pointer' : ''}`}
+                    onClick={() => canManageProject && router.push(`/projects?edit=${project.id}`)}
+                  >
+                    {/* 프로젝트명 */}
+                    <div className="col-span-3 flex items-center min-w-0">
+                      <h3 className="text-sm font-medium text-gray-900 truncate">
+                        {project.name}
+                      </h3>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 bg-gray-100 rounded-full h-2">
+
+                    {/* 현황 */}
+                    <div className="col-span-2 flex items-center">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(project.status)}`}
+                      >
+                        {getStatusLabel(project.status)}
+                      </span>
+                    </div>
+
+                    {/* 남은기간 */}
+                    <div className="col-span-2 flex items-center">
+                      <span className="text-xs text-gray-500">
+                        {remainingDays > 0 ? `${remainingDays}일 남음` : remainingDays === 0 ? '오늘 마감' : `${Math.abs(remainingDays)}일 초과`}
+                      </span>
+                    </div>
+
+                    {/* 실행율 */}
+                    <div className="col-span-5 flex items-center gap-2">
+                      <div className="flex-1 bg-gray-100 rounded-full h-2">
                         <div
                           className="bg-blue-600 h-2 rounded-full transition-all"
                           style={{ width: `${Math.round(progress)}%` }}
                         />
                       </div>
-                      <span className="text-xs font-medium text-gray-600 w-8 text-right">
+                      <span className="text-sm font-semibold text-gray-900 w-10">
                         {Math.round(progress)}%
                       </span>
                     </div>
@@ -425,45 +478,66 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 하단 3개 프로젝트 카드 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {topProjects.map((project) => (
-          <div key={project.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1">
-                <h3 className="text-base font-semibold text-gray-900 mb-1">
-                  {project.name}
-                </h3>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span className="flex items-center gap-1">
-                    <span className="w-1 h-1 bg-red-500 rounded-full"></span>
-                    {project.remainingDays}일
-                  </span>
-                  <span>
-                    {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
-                    {format(new Date(project.end_date), 'yyyy/MM/dd')}
-                  </span>
+      {/* 즐겨찾기 프로젝트 */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
+          즐겨찾기 프로젝트
+        </h2>
+        {starredProjects.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-sm p-8 border border-gray-100 text-center">
+            <Star className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-600 mb-2">아직 즐겨찾기를 한 프로젝트가 없어요.</p>
+            <p className="text-sm text-gray-500">
+              좌측의 프로젝트 탭에서 자주 확인이 필요한 프로젝트를 즐겨찾기로 고정해보세요.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {starredProjects.map((project) => (
+              <div key={project.id} className="bg-white rounded-2xl shadow-sm p-6 border border-gray-100">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <h3 className="text-base font-semibold text-gray-900 mb-1">
+                      {project.name}
+                    </h3>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <span className="w-1 h-1 bg-red-500 rounded-full"></span>
+                        {project.remainingDays > 0 ? `${project.remainingDays}일 남음` : project.remainingDays === 0 ? '오늘 마감' : `${Math.abs(project.remainingDays)}일 초과`}
+                      </span>
+                      <span>
+                        {format(new Date(project.start_date), 'yyyy/MM/dd')} ~{' '}
+                        {format(new Date(project.end_date), 'yyyy/MM/dd')}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleToggleStar(project.id, project.starred)}
+                    className="hover:scale-110 transition-transform"
+                  >
+                    <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">진행율</span>
+                    <span className="text-sm text-gray-600">계약금액</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-3xl font-bold text-gray-900">
+                      {Math.round(project.progress)}%
+                    </span>
+                    <span className="text-lg font-semibold text-gray-900">
+                      {project.contract_amount.toLocaleString()}원
+                    </span>
+                  </div>
                 </div>
               </div>
-              <Star className={`w-5 h-5 ${project.starred ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300'}`} />
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">성과율</span>
-                <span className="text-sm text-gray-600">프로젝트 성과</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-3xl font-bold text-gray-900">
-                  {Math.round(project.progress)}%
-                </span>
-                <span className="text-lg font-semibold text-gray-900">
-                  {project.contract_amount.toLocaleString()}원
-                </span>
-              </div>
-            </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
     </div>
   );

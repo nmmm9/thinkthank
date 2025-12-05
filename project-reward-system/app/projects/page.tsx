@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { getProjects, getProjectCategories, toggleProjectStar, updateProject, createProject, getMembers, getOpexList, setProjectAllocations } from '@/lib/api';
 import type { Project, ProjectCategory, MemberWithRelations, Opex } from '@/lib/supabase/database.types';
 import { useAuthStore } from '@/lib/auth-store';
@@ -19,6 +20,7 @@ interface ProjectWithRelations extends Project {
 
 export default function ProjectsPage() {
   const { member } = useAuthStore();
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<ProjectWithRelations[]>([]);
   const [projectCategories, setProjectCategories] = useState<ProjectCategory[]>([]);
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
@@ -65,6 +67,18 @@ export default function ProjectsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // URL 파라미터로 수정 모달 열기
+  useEffect(() => {
+    const editProjectId = searchParams.get('edit');
+    if (editProjectId && projects.length > 0 && canManageProject) {
+      const projectToEdit = projects.find(p => p.id === editProjectId);
+      if (projectToEdit) {
+        setSelectedProject(projectToEdit);
+        setShowEditModal(true);
+      }
+    }
+  }, [searchParams, projects, canManageProject]);
 
   // 즐겨찾기 토글
   const handleToggleStar = async (projectId: string) => {

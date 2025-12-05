@@ -31,25 +31,38 @@ export function getOverlappingSchedules(daySchedules: Schedule[]): PositionedSch
   if (daySchedules.length === 0) return [];
 
   // 각 스케줄의 시작/끝 위치 미리 계산
+  // 겹침 판단은 실제 시간 기준으로, 표시는 최소 높이 적용
   const scheduleData = daySchedules.map((schedule) => {
-    const pos = getSchedulePosition(schedule);
+    const startTime = (schedule as any).start_time;
+    const endTime = (schedule as any).end_time;
+
+    let actualTop = 0;
+    let actualBottom = HOUR_HEIGHT;
+
+    if (startTime && endTime) {
+      const startMinutes = timeToMinutes(startTime);
+      const endMinutes = timeToMinutes(endTime);
+      actualTop = Math.max(0, (startMinutes / 60 - START_HOUR) * HOUR_HEIGHT);
+      actualBottom = Math.max(0, (endMinutes / 60 - START_HOUR) * HOUR_HEIGHT);
+    }
+
     return {
       schedule,
-      top: pos.top,
-      bottom: pos.top + pos.height,
+      actualTop,      // 실제 시간 기준 (겹침 판단용)
+      actualBottom,   // 실제 시간 기준 (겹침 판단용)
       column: 0,
       totalColumns: 1,
     };
   });
 
   // 시작 시간 순으로 정렬
-  scheduleData.sort((a, b) => a.top - b.top);
+  scheduleData.sort((a, b) => a.actualTop - b.actualTop);
 
-  // 1단계: 각 스케줄의 컬럼 배치
+  // 1단계: 각 스케줄의 컬럼 배치 (실제 시간 기준으로 겹침 판단)
   scheduleData.forEach((current, index) => {
-    // 현재 스케줄과 겹치는 이전 스케줄들 찾기
+    // 현재 스케줄과 겹치는 이전 스케줄들 찾기 (실제 시간 기준)
     const overlapping = scheduleData.slice(0, index).filter(
-      (other) => !(current.top >= other.bottom || current.bottom <= other.top)
+      (other) => !(current.actualTop >= other.actualBottom || current.actualBottom <= other.actualTop)
     );
 
     // 사용 가능한 컬럼 찾기
@@ -76,7 +89,8 @@ export function getOverlappingSchedules(daySchedules: Schedule[]): PositionedSch
 
       const current = scheduleData[idx];
       scheduleData.forEach((other, otherIdx) => {
-        if (!visited.has(otherIdx) && !(current.top >= other.bottom || current.bottom <= other.top)) {
+        // 실제 시간 기준으로 겹침 판단
+        if (!visited.has(otherIdx) && !(current.actualTop >= other.actualBottom || current.actualBottom <= other.actualTop)) {
           queue.push(otherIdx);
         }
       });

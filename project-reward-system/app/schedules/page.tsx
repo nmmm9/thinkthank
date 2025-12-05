@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { format, startOfWeek, addDays, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { format, startOfWeek, addDays, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
+import { useSearchParams } from 'next/navigation';
 import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, getMembers, updateMember, getWorkTimeSetting, getUnclassifiedSchedules, assignProjectToSchedule, getDailyLunchTimes, updateDailyLunchTime } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { useCalendarSync } from '@/hooks/useCalendarSync';
@@ -29,9 +30,23 @@ import type { ScheduleEntry, ViewMode, DragPreviewState, ContextMenuState, Viewi
 
 export default function SchedulesPage() {
   const { member } = useAuthStore();
+  const searchParams = useSearchParams();
+
+  // URL에서 날짜 파라미터 읽기
+  const getInitialDate = () => {
+    const dateParam = searchParams.get('date');
+    if (dateParam) {
+      try {
+        return parseISO(dateParam);
+      } catch {
+        return new Date();
+      }
+    }
+    return new Date();
+  };
 
   // 기본 상태
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(getInitialDate);
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [projects, setProjects] = useState<Project[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -112,6 +127,19 @@ export default function SchedulesPage() {
   // 색상 피커 상태
   const [colorPickerMemberId, setColorPickerMemberId] = useState<string | null>(null);
   const [previewMemberColor, setPreviewMemberColor] = useState<string | null>(null);
+
+  // URL 파라미터 변경 시 날짜 업데이트
+  useEffect(() => {
+    const dateParam = searchParams.get('date');
+    if (dateParam) {
+      try {
+        const newDate = parseISO(dateParam);
+        setCurrentDate(newDate);
+      } catch {
+        // 무효한 날짜는 무시
+      }
+    }
+  }, [searchParams]);
 
   // 데이터 새로고침
   const refreshSchedules = async () => {
