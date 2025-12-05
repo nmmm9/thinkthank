@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAuthStore } from '@/lib/auth-store';
 import { supabase } from '@/lib/supabase/client';
 import { getCalendarSyncSettings } from '@/lib/api/calendar-sync';
@@ -10,6 +10,15 @@ interface UseCalendarSyncOptions {
   autoSyncInterval?: number; // 밀리초 (기본 5분)
 }
 
+interface HistorySyncProgress {
+  isRunning: boolean;
+  currentPeriod: string; // "2024년 3월" 형식
+  totalMonths: number;
+  completedMonths: number;
+  totalEvents: number;
+  error?: string;
+}
+
 export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
   const { member, user } = useAuthStore();
   const { onSyncComplete, autoSyncInterval = 5 * 60 * 1000 } = options;
@@ -17,6 +26,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
   const syncSettingsRef = useRef<any>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isSyncingRef = useRef(false);
+  const [historySyncProgress, setHistorySyncProgress] = useState<HistorySyncProgress | null>(null);
 
   // Google 로그인 여부
   const isGoogleUser = user?.app_metadata?.provider === 'google';
@@ -167,10 +177,135 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
     };
   }, [member?.id, isGoogleUser, autoSyncInterval, syncCalendar]);
 
+  // 전체 히스토리 동기화 (월별 청크로 처리, 월당 최대 1000개)
+  // startYear, startMonth: 동기화 시작 년월 (예: 2020, 1 = 2020년 1월부터)
+  const syncHistory = useCallback(async (startYear: number, startMonth: number) => {
+    if (!member?.id || !isGoogleUser || historySyncProgress?.isRunning) return;
+
+    const settings = syncSettingsRef.current || await loadSyncSettings();
+    if (!settings?.is_enabled || !settings?.google_calendar_id) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.provider_token;
+
+      if (!accessToken) {
+        setHistorySyncProgress({
+          isRunning: false,
+          currentPeriod: '',
+          totalMonths: 0,
+          completedMonths: 0,
+          totalEvents: 0,
+          error: 'Google 인증이 필요합니다. 다시 로그인해주세요.',
+        });
+        return;
+      }
+
+      const now = new Date();
+      const startDate = new Date(startYear, startMonth - 1, 1); // startMonth는 1-12
+
+      // 월 단위 청크 생성 (최신 → 과거 순서)
+      const months: { year: number; month: number }[] = [];
+
+      // 3개월 후까지 포함
+      for (let i = 3; i >= 1; i--) {
+        const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        months.push({ year: futureDate.getFullYear(), month: futureDate.getMonth() });
+      }
+
+      // 현재부터 시작일까지
+      let current = new Date(now.getFullYear(), now.getMonth(), 1);
+      while (current >= startDate) {
+        months.push({ year: current.getFullYear(), month: current.getMonth() });
+        current = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+      }
+
+      const totalMonths = months.length;
+      let totalEvents = 0;
+      let completedMonths = 0;
+
+      setHistorySyncProgress({
+        isRunning: true,
+        currentPeriod: '',
+        totalMonths,
+        completedMonths: 0,
+        totalEvents: 0,
+      });
+
+      // 월별로 동기화
+      for (const { year, month } of months) {
+        const startDate = new Date(year, month, 1);
+        const endDate = new Date(year, month + 1, 0); // 해당 월의 마지막 날
+        const startStr = startDate.toISOString().split('T')[0];
+        const endStr = endDate.toISOString().split('T')[0];
+        const periodStr = `${year}년 ${month + 1}월`;
+
+        setHistorySyncProgress((prev) => ({
+          ...prev!,
+          currentPeriod: periodStr,
+          completedMonths,
+        }));
+
+        const response = await fetch('/api/calendar/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            memberId: member.id,
+            accessToken,
+            calendarId: settings.google_calendar_id,
+            syncOptions: {
+              startDate: startStr,
+              endDate: endStr,
+              maxResults: 1000, // 월당 최대 1000개
+              isHistorySync: completedMonths > 3, // 미래 3개월 이후는 히스토리 모드
+            },
+          }),
+        });
+
+        const data = await response.json();
+        completedMonths++;
+
+        if (data.error) {
+          console.error(`Sync error for ${periodStr}:`, data.error);
+        } else {
+          totalEvents += data.stats?.created || 0;
+        }
+
+        setHistorySyncProgress((prev) => ({
+          ...prev!,
+          completedMonths,
+          totalEvents,
+        }));
+
+        // API 제한 방지 (100ms 대기)
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      setHistorySyncProgress({
+        isRunning: false,
+        currentPeriod: '완료',
+        totalMonths,
+        completedMonths: totalMonths,
+        totalEvents,
+      });
+
+      onSyncComplete?.();
+    } catch (error: any) {
+      console.error('History sync failed:', error);
+      setHistorySyncProgress((prev) => ({
+        ...prev!,
+        isRunning: false,
+        error: error.message || '동기화 중 오류가 발생했습니다.',
+      }));
+    }
+  }, [member?.id, isGoogleUser, historySyncProgress?.isRunning, loadSyncSettings, onSyncComplete]);
+
   return {
     syncCalendar,
     syncSchedule,
+    syncHistory,
     loadSyncSettings,
     isGoogleUser,
+    historySyncProgress,
   };
 }

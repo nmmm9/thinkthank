@@ -74,12 +74,14 @@ export async function getCalendarEvents(
     syncToken?: string;
     timeMin?: string;
     timeMax?: string;
-    maxResults?: number;
+    maxResults?: number; // 전체 최대 이벤트 수 (기본값: 무제한)
   }
 ): Promise<GoogleCalendarEventsResponse> {
   const allItems: GoogleCalendarEvent[] = [];
   let pageToken: string | undefined;
   let nextSyncToken: string | undefined;
+  const maxTotalEvents = options?.maxResults || Infinity;
+  const pageSize = Math.min(250, maxTotalEvents); // 페이지당 최대 250개 (타임아웃 방지)
 
   do {
     const params = new URLSearchParams();
@@ -95,8 +97,9 @@ export async function getCalendarEvents(
       params.append('orderBy', 'startTime');
     }
 
-    // 페이지당 최대 2500개 (Google API 최대값)
-    params.append('maxResults', '2500');
+    // 남은 필요 이벤트 수만큼만 요청
+    const remaining = maxTotalEvents - allItems.length;
+    params.append('maxResults', String(Math.min(pageSize, remaining)));
 
     if (pageToken) {
       params.append('pageToken', pageToken);
@@ -127,15 +130,20 @@ export async function getCalendarEvents(
     pageToken = data.nextPageToken;
     nextSyncToken = data.nextSyncToken;
 
-    // API 제한 방지를 위해 다음 페이지 요청 전 100ms 대기
+    // 최대 이벤트 수 도달 시 중단
+    if (allItems.length >= maxTotalEvents) {
+      break;
+    }
+
+    // API 제한 방지를 위해 다음 페이지 요청 전 50ms 대기
     if (pageToken) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
 
   } while (pageToken); // 다음 페이지가 있으면 계속
 
   return {
-    items: allItems,
+    items: allItems.slice(0, maxTotalEvents), // 혹시 초과했을 경우 자르기
     nextSyncToken,
   };
 }

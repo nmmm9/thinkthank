@@ -16,7 +16,7 @@ const supabase = createClient(
 
 export async function POST(request: NextRequest) {
   try {
-    const { memberId, accessToken, calendarId, action, scheduleData } = await request.json();
+    const { memberId, accessToken, calendarId, action, scheduleData, syncOptions } = await request.json();
 
     if (!memberId || !accessToken || !calendarId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -27,8 +27,8 @@ export async function POST(request: NextRequest) {
       return handleScheduleAction(accessToken, calendarId, action, scheduleData, memberId);
     }
 
-    // 전체 동기화
-    return handleFullSync(accessToken, calendarId, memberId);
+    // 전체 동기화 (날짜 범위 지정 가능)
+    return handleFullSync(accessToken, calendarId, memberId, syncOptions);
   } catch (error: any) {
     console.error('Calendar sync error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -105,8 +105,21 @@ async function handleScheduleAction(
   }
 }
 
+// 동기화 옵션 타입
+interface SyncOptions {
+  startDate?: string; // YYYY-MM-DD 형식
+  endDate?: string;   // YYYY-MM-DD 형식
+  maxResults?: number;
+  isHistorySync?: boolean; // 히스토리 동기화 모드 (삭제 처리 안함)
+}
+
 // 전체 동기화
-async function handleFullSync(accessToken: string, calendarId: string, memberId: string) {
+async function handleFullSync(
+  accessToken: string,
+  calendarId: string,
+  memberId: string,
+  syncOptions?: SyncOptions
+) {
   try {
     // 1. 동기화 설정 가져오기
     const { data: syncSettings } = await supabase
@@ -134,25 +147,35 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
 
     const projectMap = new Map(projects?.map((p) => [p.name, p.id]) || []);
 
-    // 4. Google Calendar에서 이벤트 가져오기
-    // syncToken 증분 동기화 대신 항상 전체 동기화 (삭제 감지 안정성을 위해)
+    // 4. 동기화 날짜 범위 설정
     const now = new Date();
-    const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-    const threeMonthsLater = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    let timeMin: Date;
+    let timeMax: Date;
 
-    // 페이지네이션으로 전체 이벤트 가져오기 (제한 없음)
+    if (syncOptions?.startDate && syncOptions?.endDate) {
+      // 사용자 지정 범위 (히스토리 동기화용)
+      timeMin = new Date(syncOptions.startDate);
+      timeMax = new Date(syncOptions.endDate);
+    } else {
+      // 기본 범위: 6개월 전 ~ 3개월 후
+      timeMin = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+      timeMax = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    }
+
+    // 페이지네이션으로 이벤트 가져오기 (주별 동기화는 제한 없음)
     const calendarEvents = await getCalendarEvents(accessToken, calendarId, {
-      timeMin: oneYearAgo.toISOString(),
-      timeMax: threeMonthsLater.toISOString(),
+      timeMin: timeMin.toISOString(),
+      timeMax: timeMax.toISOString(),
+      maxResults: syncOptions?.maxResults, // 없으면 무제한
     });
 
-    // 5. 기존 스케줄 가져오기
+    // 5. 기존 스케줄 가져오기 (동기화 범위 내)
     const { data: existingSchedules } = await supabase
       .from('schedules')
       .select('*')
       .eq('member_id', memberId)
-      .gte('date', oneYearAgo.toISOString().split('T')[0])
-      .lte('date', threeMonthsLater.toISOString().split('T')[0]);
+      .gte('date', timeMin.toISOString().split('T')[0])
+      .lte('date', timeMax.toISOString().split('T')[0]);
 
     const scheduleByGoogleId = new Map(
       existingSchedules?.filter((s) => s.google_event_id).map((s) => [s.google_event_id, s]) || []
@@ -234,19 +257,21 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
       }
     }
 
-    // 7. Google Calendar에서 삭제된 스케줄 감지
-    const activeGoogleEventIds = new Set(
-      (calendarEvents.items || [])
-        .filter((e) => e.id && e.status !== 'cancelled')
-        .map((e) => e.id)
-    );
+    // 7. Google Calendar에서 삭제된 스케줄 감지 (히스토리 동기화 시에는 건너뜀)
+    if (!syncOptions?.isHistorySync) {
+      const activeGoogleEventIds = new Set(
+        (calendarEvents.items || [])
+          .filter((e) => e.id && e.status !== 'cancelled')
+          .map((e) => e.id)
+      );
 
-    // google_event_id가 있지만 Google Calendar에 없는 스케줄
-    const orphanedSchedules = existingSchedules?.filter(
-      (s) => s.google_event_id && !activeGoogleEventIds.has(s.google_event_id)
-    ) || [];
+      // google_event_id가 있지만 Google Calendar에 없는 스케줄
+      const orphanedSchedules = existingSchedules?.filter(
+        (s) => s.google_event_id && !activeGoogleEventIds.has(s.google_event_id)
+      ) || [];
 
-    orphanedSchedules.forEach((s) => toDeleteIds.push(s.id));
+      orphanedSchedules.forEach((s) => toDeleteIds.push(s.id));
+    }
 
     // 8. 배치 INSERT (100개씩)
     const BATCH_SIZE = 100;
@@ -292,9 +317,15 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
     return NextResponse.json({
       success: true,
       stats: {
+        fetched: calendarEvents.items?.length || 0,
         created,
         updated,
         deleted,
+        syncRange: {
+          from: timeMin.toISOString().split('T')[0],
+          to: timeMax.toISOString().split('T')[0],
+        },
+        isHistorySync: syncOptions?.isHistorySync || false,
       },
     });
   } catch (error: any) {

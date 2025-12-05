@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Calendar, RefreshCw, Link2, Unlink, Check, AlertCircle } from 'lucide-react';
+import { Calendar, RefreshCw, Link2, Unlink, Check, AlertCircle, History } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth-store';
 import { supabase } from '@/lib/supabase/client';
+import { useCalendarSync } from '@/hooks/useCalendarSync';
 
 interface CalendarSyncSettings {
   id: string;
@@ -29,9 +30,14 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
   const [isEnabling, setIsEnabling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [syncStartYear, setSyncStartYear] = useState<number>(new Date().getFullYear() - 1);
+  const [syncStartMonth, setSyncStartMonth] = useState<number>(1); // 1-12
 
   // Google 로그인 여부 확인
   const isGoogleUser = user?.app_metadata?.provider === 'google';
+
+  // 히스토리 동기화 훅
+  const { syncHistory, historySyncProgress } = useCalendarSync({ onSyncComplete });
 
   // 설정 및 캘린더 목록 로드
   useEffect(() => {
@@ -105,10 +111,12 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
       }
 
       setSettings(data.settings);
-      setSuccessMessage('캘린더 연동이 활성화되었습니다.');
+      setSuccessMessage('캘린더 연동이 활성화되었습니다. 동기화를 시작합니다...');
 
-      // 바로 동기화 실행
-      await handleSync();
+      // 선택한 시작 년월로 히스토리 동기화 실행
+      setTimeout(() => {
+        syncHistory(syncStartYear, syncStartMonth);
+      }, 500);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -288,7 +296,7 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
             <div className="flex gap-2">
               <button
                 onClick={handleSync}
-                disabled={isSyncing}
+                disabled={isSyncing || historySyncProgress?.isRunning}
                 className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
               >
                 <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
@@ -302,6 +310,76 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
                 <Unlink className="w-3 h-3" />
               </button>
             </div>
+
+            {/* 히스토리 동기화 */}
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-2">과거 일정 전체 동기화</p>
+              <div className="flex gap-2 items-center">
+                <select
+                  value={syncStartYear}
+                  onChange={(e) => setSyncStartYear(Number(e.target.value))}
+                  disabled={historySyncProgress?.isRunning}
+                  className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
+                >
+                  {Array.from({ length: 15 }, (_, i) => new Date().getFullYear() - i).map((year) => (
+                    <option key={year} value={year}>{year}년</option>
+                  ))}
+                </select>
+                <select
+                  value={syncStartMonth}
+                  onChange={(e) => setSyncStartMonth(Number(e.target.value))}
+                  disabled={historySyncProgress?.isRunning}
+                  className="w-14 px-1 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-purple-500"
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                    <option key={month} value={month}>{month}월</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => syncHistory(syncStartYear, syncStartMonth)}
+                  disabled={historySyncProgress?.isRunning || isSyncing}
+                  className="flex items-center justify-center gap-1 px-3 py-1.5 bg-purple-600 text-white text-xs rounded hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                >
+                  <History className={`w-3 h-3 ${historySyncProgress?.isRunning ? 'animate-spin' : ''}`} />
+                  {historySyncProgress?.isRunning ? '진행중' : '시작'}
+                </button>
+              </div>
+
+              {/* 진행 상태 표시 */}
+              {historySyncProgress?.isRunning && (
+                <div className="mt-2 bg-purple-50 rounded p-2">
+                  <div className="flex justify-between text-xs text-purple-700 mb-1">
+                    <span>{historySyncProgress.currentPeriod}</span>
+                    <span>{historySyncProgress.completedMonths}/{historySyncProgress.totalMonths}</span>
+                  </div>
+                  <div className="w-full bg-purple-200 rounded-full h-1.5">
+                    <div
+                      className="bg-purple-600 h-1.5 rounded-full transition-all"
+                      style={{ width: `${(historySyncProgress.completedMonths / historySyncProgress.totalMonths) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-purple-600 mt-1">
+                    {historySyncProgress.totalEvents}개 이벤트 동기화됨
+                  </p>
+                </div>
+              )}
+
+              {/* 완료 메시지 */}
+              {historySyncProgress && !historySyncProgress.isRunning && historySyncProgress.completedMonths > 0 && (
+                <div className="mt-2 bg-green-50 rounded p-2">
+                  <p className="text-xs text-green-700">
+                    완료! {historySyncProgress.totalEvents}개 이벤트 동기화됨
+                  </p>
+                </div>
+              )}
+
+              {/* 에러 메시지 */}
+              {historySyncProgress?.error && (
+                <div className="mt-2 bg-red-50 rounded p-2">
+                  <p className="text-xs text-red-700">{historySyncProgress.error}</p>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           // 연동 안됨 상태
@@ -312,27 +390,71 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
             </div>
 
             {calendars.length > 0 && (
-              <select
-                value={selectedCalendarId}
-                onChange={(e) => setSelectedCalendarId(e.target.value)}
-                className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                {calendars.map((calendar) => (
-                  <option key={calendar.id} value={calendar.id}>
-                    {getShortCalendarName(calendar.summary)} {calendar.primary && '(기본)'}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={selectedCalendarId}
+                  onChange={(e) => setSelectedCalendarId(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {calendars.map((calendar) => (
+                    <option key={calendar.id} value={calendar.id}>
+                      {getShortCalendarName(calendar.summary)} {calendar.primary && '(기본)'}
+                    </option>
+                  ))}
+                </select>
+
+                {/* 동기화 시작 년월 선택 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 whitespace-nowrap">시작:</span>
+                  <select
+                    value={syncStartYear}
+                    onChange={(e) => setSyncStartYear(Number(e.target.value))}
+                    className="flex-1 px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 15 }, (_, i) => new Date().getFullYear() - i).map((year) => (
+                      <option key={year} value={year}>{year}년</option>
+                    ))}
+                  </select>
+                  <select
+                    value={syncStartMonth}
+                    onChange={(e) => setSyncStartMonth(Number(e.target.value))}
+                    className="w-16 px-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                      <option key={month} value={month}>{month}월</option>
+                    ))}
+                  </select>
+                </div>
+              </>
             )}
 
             <button
               onClick={handleEnable}
-              disabled={isEnabling || !selectedCalendarId}
+              disabled={isEnabling || !selectedCalendarId || historySyncProgress?.isRunning}
               className="w-full flex items-center justify-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               <Link2 className="w-3 h-3" />
               {isEnabling ? '연동 중...' : '연동하기'}
             </button>
+
+            {/* 동기화 진행 상태 */}
+            {historySyncProgress?.isRunning && (
+              <div className="mt-2 bg-blue-50 rounded p-2">
+                <div className="flex justify-between text-xs text-blue-700 mb-1">
+                  <span>{historySyncProgress.currentPeriod}</span>
+                  <span>{historySyncProgress.completedMonths}/{historySyncProgress.totalMonths}</span>
+                </div>
+                <div className="w-full bg-blue-200 rounded-full h-1.5">
+                  <div
+                    className="bg-blue-600 h-1.5 rounded-full transition-all"
+                    style={{ width: `${(historySyncProgress.completedMonths / historySyncProgress.totalMonths) * 100}%` }}
+                  />
+                </div>
+                <p className="text-xs text-blue-600 mt-1">
+                  {historySyncProgress.totalEvents}개 이벤트 동기화됨
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
