@@ -148,34 +148,22 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
     }
   }, [member?.id, isGoogleUser, loadSyncSettings]);
 
-  // 페이지 로드 시 동기화 설정 로드 및 초기 동기화
+  // 페이지 로드 시 동기화 설정 로드 (초기 1회만)
+  const initializedRef = useRef(false);
   useEffect(() => {
-    if (!member?.id || !isGoogleUser) return;
+    if (!member?.id || !isGoogleUser || initializedRef.current) return;
+    initializedRef.current = true;
 
     const init = async () => {
       await loadSyncSettings();
-      // 초기 동기화
-      await syncCalendar();
+      // 초기 동기화는 수동으로만 (자동 동기화 제거)
     };
 
     init();
-  }, [member?.id, isGoogleUser, loadSyncSettings, syncCalendar]);
+  }, [member?.id, isGoogleUser]); // loadSyncSettings, syncCalendar 의존성 제거
 
-  // 주기적 동기화 (5분마다)
-  useEffect(() => {
-    if (!member?.id || !isGoogleUser) return;
-
-    // 인터벌 설정
-    intervalRef.current = setInterval(() => {
-      syncCalendar();
-    }, autoSyncInterval);
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [member?.id, isGoogleUser, autoSyncInterval, syncCalendar]);
+  // 주기적 동기화 제거 - 수동 동기화만 사용
+  // (과부하 방지 + 불필요한 API 호출 감소)
 
   // 전체 히스토리 동기화 (월별 청크로 처리, 월당 최대 1000개)
   // startYear, startMonth: 동기화 시작 년월 (예: 2020, 1 = 2020년 1월부터)
