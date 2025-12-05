@@ -81,16 +81,39 @@ export async function getScheduleByGoogleEventId(googleEventId: string) {
 }
 
 // 미분류 스케줄 조회 (프로젝트 없는 스케줄)
+// Supabase Max Rows 제한 우회를 위해 페이지네이션 사용
 export async function getUnclassifiedSchedules(memberId: string) {
-  const { data, error } = await supabase
-    .from('schedules')
-    .select('*')
-    .eq('member_id', memberId)
-    .is('project_id', null)
-    .order('date', { ascending: false });
+  const allData: any[] = [];
+  const pageSize = 1000;
+  let page = 0;
+  let hasMore = true;
 
-  if (error) throw error;
-  return data || [];
+  while (hasMore) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, error } = await supabase
+      .from('schedules')
+      .select('*')
+      .eq('member_id', memberId)
+      .is('project_id', null)
+      .order('date', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      allData.push(...data);
+      page++;
+      if (data.length < pageSize) {
+        hasMore = false;
+      }
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
 }
 
 // 스케줄 프로젝트 지정

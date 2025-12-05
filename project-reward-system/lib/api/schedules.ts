@@ -2,19 +2,42 @@ import { supabase } from '@/lib/supabase/client';
 import type { ScheduleInsert, ScheduleUpdate } from '@/lib/supabase/database.types';
 
 // 스케줄 목록 조회 (프로젝트, 멤버 정보 포함)
+// Supabase Max Rows 제한 우회를 위해 페이지네이션 사용
 export async function getSchedules() {
-  const { data, error } = await supabase
-    .from('schedules')
-    .select(`
-      *,
-      project:projects(*),
-      member:members(*)
-    `)
-    .order('date', { ascending: false })
-    .limit(100000); // Supabase 기본 1000 제한 해제
+  const allData: any[] = [];
+  const pageSize = 1000;
+  let page = 0;
+  let hasMore = true;
 
-  if (error) throw error;
-  return data;
+  while (hasMore) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, error } = await supabase
+      .from('schedules')
+      .select(`
+        *,
+        project:projects(*),
+        member:members(*)
+      `)
+      .order('date', { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    if (data && data.length > 0) {
+      allData.push(...data);
+      page++;
+      // 가져온 데이터가 pageSize보다 적으면 더 이상 없음
+      if (data.length < pageSize) {
+        hasMore = false;
+      }
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allData;
 }
 
 // 스케줄 생성
