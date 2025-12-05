@@ -21,7 +21,9 @@ export default function ProgressBar({
 
   const percent = planned > 0 ? (actual / planned) * 100 : 0;
   const isOverBudget = actual > planned;
-  const saved = planned - actual;
+  const saved = Number((planned - actual).toFixed(1));
+  const formattedPlanned = Number(Number(planned).toFixed(1));
+  const formattedActual = Number(Number(actual).toFixed(1));
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -44,7 +46,7 @@ export default function ProgressBar({
           <span className="text-sm text-gray-600">{label}</span>
           {showValues && (
             <span className="text-sm font-medium text-gray-900">
-              {actual}{unit} / {planned}{unit}
+              {formattedActual}{unit} / {formattedPlanned}{unit}
             </span>
           )}
         </div>
@@ -92,7 +94,7 @@ export default function ProgressBar({
         <span className={`text-xs font-medium ${
           saved > 0 ? 'text-green-600' : saved < 0 ? 'text-red-600' : 'text-gray-500'
         }`}>
-          {saved > 0 ? `${saved}${unit} 절약` : saved < 0 ? `${Math.abs(saved)}${unit} 초과` : '예상과 동일'}
+          {saved > 0 ? `${saved}${unit} 절약` : saved < 0 ? `${Number(Math.abs(saved).toFixed(1))}${unit} 초과` : '예상과 동일'}
         </span>
         <span className={`text-xs ${
           percent <= 100 ? 'text-green-600' : 'text-red-600'

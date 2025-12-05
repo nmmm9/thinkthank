@@ -147,9 +147,10 @@ function timeToMinutes(time: string): number {
   return hours * 60 + mins;
 }
 
-// 스케줄의 업무시간 내 유효 분 계산
+// 스케줄의 업무시간 내 유효 분 계산 (점심시간 제외)
 // schedule: { date, start_time, end_time, minutes }
 // workHours: { start: "09:30", end: "18:30" }
+// lunchHours: { start: "12:00", end: "13:00" } (optional)
 export function calculateEffectiveMinutes(
   schedule: {
     date?: string;
@@ -160,7 +161,11 @@ export function calculateEffectiveMinutes(
   workHours: {
     start: string;
     end: string;
-  }
+  },
+  lunchHours?: {
+    start: string;
+    end: string;
+  } | null
 ): number {
   // 주말인 경우 0 반환
   if (schedule.date) {
@@ -194,9 +199,22 @@ export function calculateEffectiveMinutes(
   // 겹치는 구간 계산
   const overlapStart = Math.max(scheduleStart, workStart);
   const overlapEnd = Math.min(scheduleEnd, workEnd);
-  const effectiveMinutes = Math.max(0, overlapEnd - overlapStart);
+  let effectiveMinutes = Math.max(0, overlapEnd - overlapStart);
 
-  return effectiveMinutes;
+  // 점심시간 제외
+  if (lunchHours) {
+    const lunchStart = timeToMinutes(lunchHours.start);
+    const lunchEnd = timeToMinutes(lunchHours.end);
+
+    // 스케줄과 점심시간이 겹치는 부분 계산
+    const lunchOverlapStart = Math.max(overlapStart, lunchStart);
+    const lunchOverlapEnd = Math.min(overlapEnd, lunchEnd);
+    const lunchOverlap = Math.max(0, lunchOverlapEnd - lunchOverlapStart);
+
+    effectiveMinutes -= lunchOverlap;
+  }
+
+  return Math.max(0, effectiveMinutes);
 }
 
 // 스케줄 배열의 유효 분 합계 계산

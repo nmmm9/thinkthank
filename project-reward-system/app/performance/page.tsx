@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { getProjects, getMembers, getOpexList, getSchedules, getCommentsByMember, getWorkTimeSetting, type PerformanceCommentWithRelations } from '@/lib/api';
+import { getDailyLunchTimes } from '@/lib/api/settings';
 import type { Project, Opex, MemberWithRelations, Schedule, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { ChevronDown, ChevronRight, Briefcase, MessageSquare, MessageCircle, Calendar, User } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -29,12 +30,27 @@ export default function PerformancePage() {
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
+  const [dailyLunchTimes, setDailyLunchTimes] = useState<Record<string, { start: string; end: string }>>({});
   const [isLoading, setIsLoading] = useState(true);
 
   // 업무시간 설정 (기본값: 09:30 ~ 18:30)
   const workHours = {
     start: workTimeSetting?.work_start_time || '09:30',
     end: workTimeSetting?.work_end_time || '18:30',
+  };
+
+  // 기본 점심시간 설정 (기본값: 12:00 ~ 13:00)
+  const defaultLunchHours = {
+    start: workTimeSetting?.lunch_start_time || '12:00',
+    end: workTimeSetting?.lunch_end_time || '13:00',
+  };
+
+  // 특정 날짜의 점심시간 가져오기
+  const getLunchHoursForDate = (date: string) => {
+    if (dailyLunchTimes[date]) {
+      return dailyLunchTimes[date];
+    }
+    return defaultLunchHours;
   };
 
   // 탭 상태
@@ -109,6 +125,28 @@ export default function PerformancePage() {
         setOpexes(opexData);
         setSchedules(schedulesData);
         setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
+
+        // 스케줄 날짜 범위에서 일별 점심시간 로드
+        const schedulesList = schedulesData as Schedule[];
+        if (schedulesList.length > 0) {
+          const dates = schedulesList.map(s => s.date).sort();
+          const startDate = dates[0];
+          const endDate = dates[dates.length - 1];
+
+          try {
+            const lunchTimesData = await getDailyLunchTimes(startDate, endDate);
+            const lunchTimesMap: Record<string, { start: string; end: string }> = {};
+            lunchTimesData.forEach((lt: any) => {
+              lunchTimesMap[lt.date] = {
+                start: lt.start_time,
+                end: lt.end_time,
+              };
+            });
+            setDailyLunchTimes(lunchTimesMap);
+          } catch (err) {
+            console.error('Failed to load daily lunch times:', err);
+          }
+        }
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -173,9 +211,10 @@ export default function PerformancePage() {
     const memberSchedules = schedules.filter(
       (s) => s.member_id === allocation.member_id && s.project_id === projectId
     );
-    // 업무시간 내 유효 분만 계산
+    // 업무시간 내 유효 분만 계산 (점심시간 제외)
     const actualMinutes = memberSchedules.reduce((sum, s) => {
-      return sum + calculateEffectiveMinutes(s, workHours);
+      const lunchHours = getLunchHoursForDate(s.date);
+      return sum + calculateEffectiveMinutes(s, workHours, lunchHours);
     }, 0);
     const actualDays = actualMinutes / 480;
 
@@ -214,10 +253,10 @@ export default function PerformancePage() {
       dailyCost: Math.round(dailyCost),
       dailyOpex: Math.round(dailyOpex),
       dailyTotalCost: Math.round(dailyTotalCost),
-      plannedDays,
-      actualDays: Math.round(actualDays * 10) / 10,
-      savedDays: Math.round(savedDays * 10) / 10,
-      efficiencyRate: Math.round(efficiencyRate * 10) / 10,
+      plannedDays: Number(Number(plannedDays).toFixed(1)),
+      actualDays: Number(actualDays.toFixed(1)),
+      savedDays: Number(savedDays.toFixed(1)),
+      efficiencyRate: Number(efficiencyRate.toFixed(1)),
       plannedInvestment: Math.round(plannedInvestment),
       actualInvestment: Math.round(actualInvestment),
     };
@@ -401,9 +440,9 @@ export default function PerformancePage() {
           </div>
         ) : displayProjects.map(({ project, memberPerfs, contractAmount, plannedInvestment, actualInvestment, plannedPerformance, actualPerformance, performanceDiff, companySharePercent, teamSharePercent, companyShare, teamShare }) => {
           const isExpanded = expandedProjects[project.id];
-          const totalPlannedDays = memberPerfs.reduce((sum: number, p: any) => sum + p.plannedDays, 0);
-          const totalActualDays = memberPerfs.reduce((sum: number, p: any) => sum + p.actualDays, 0);
-          const daysDiff = totalActualDays - totalPlannedDays;
+          const totalPlannedDays = Number(memberPerfs.reduce((sum: number, p: any) => sum + p.plannedDays, 0).toFixed(1));
+          const totalActualDays = Number(memberPerfs.reduce((sum: number, p: any) => sum + p.actualDays, 0).toFixed(1));
+          const daysDiff = Number((totalActualDays - totalPlannedDays).toFixed(1));
 
           // 일반 사원용: 자신의 배분금액
           const myPerf = !isAdmin ? memberPerfs.find((m: any) => m.memberId === currentUser?.id) : null;
@@ -596,16 +635,16 @@ export default function PerformancePage() {
                                     </div>
                                   </td>
                                   <td className="px-4 py-3 text-center text-gray-700">
-                                    {perf.plannedDays}일
+                                    {Number(perf.plannedDays.toFixed(1))}일
                                   </td>
                                   <td className="px-4 py-3 text-center text-gray-700">
-                                    {perf.actualDays}일
+                                    {Number(perf.actualDays.toFixed(1))}일
                                   </td>
                                   <td className={`px-4 py-3 text-center font-medium ${perf.savedDays > 0 ? 'text-green-600' : perf.savedDays < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                                    {perf.savedDays > 0 ? '+' : ''}{perf.savedDays}일
+                                    {perf.savedDays > 0 ? '+' : ''}{Number(perf.savedDays.toFixed(1))}일
                                   </td>
                                   <td className={`px-4 py-3 text-center font-medium ${perf.efficiencyRate > 0 ? 'text-green-600' : perf.efficiencyRate < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                                    {perf.efficiencyRate > 0 ? '+' : ''}{perf.efficiencyRate}%
+                                    {perf.efficiencyRate > 0 ? '+' : ''}{Number(perf.efficiencyRate.toFixed(1))}%
                                   </td>
                                   <td className="px-4 py-3 text-right text-gray-700">
                                     {perf.sharePercent > 0 ? `${perf.sharePercent}%` : '-'}
@@ -658,7 +697,7 @@ export default function PerformancePage() {
                         <div className={`rounded-lg p-4 border ${(myPerf?.savedDays || 0) > 0 ? 'bg-green-50 border-green-200' : (myPerf?.savedDays || 0) < 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
                           <div className="text-sm text-gray-600 mb-1">절약 일수</div>
                           <div className={`text-xl font-bold ${(myPerf?.savedDays || 0) > 0 ? 'text-green-600' : (myPerf?.savedDays || 0) < 0 ? 'text-red-600' : 'text-gray-600'}`}>
-                            {(myPerf?.savedDays || 0) > 0 ? '+' : ''}{myPerf?.savedDays || 0}일
+                            {(myPerf?.savedDays || 0) > 0 ? '+' : ''}{Number((myPerf?.savedDays || 0).toFixed(1))}일
                           </div>
                         </div>
                         <div className={`rounded-lg p-4 border ${(myPerf?.shareAmount || 0) > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>

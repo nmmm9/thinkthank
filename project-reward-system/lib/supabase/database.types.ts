@@ -455,6 +455,8 @@ export interface Database {
           work_minutes_per_day: number
           work_start_time: string
           work_end_time: string
+          lunch_start_time: string
+          lunch_end_time: string
           created_at: string
           updated_at: string
         }
@@ -464,6 +466,8 @@ export interface Database {
           work_minutes_per_day?: number
           work_start_time?: string
           work_end_time?: string
+          lunch_start_time?: string
+          lunch_end_time?: string
           created_at?: string
           updated_at?: string
         }
@@ -473,6 +477,8 @@ export interface Database {
           work_minutes_per_day?: number
           work_start_time?: string
           work_end_time?: string
+          lunch_start_time?: string
+          lunch_end_time?: string
           created_at?: string
           updated_at?: string
         }
@@ -510,6 +516,35 @@ export interface Database {
           expires_at?: string
           accepted_at?: string | null
           created_at?: string
+        }
+      }
+      daily_lunch_times: {
+        Row: {
+          id: string
+          org_id: string
+          date: string
+          start_time: string
+          end_time: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          date: string
+          start_time?: string
+          end_time?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          date?: string
+          start_time?: string
+          end_time?: string
+          created_at?: string
+          updated_at?: string
         }
       }
       performance_comments: {
@@ -586,6 +621,7 @@ export type Holiday = Database['public']['Tables']['holidays']['Row']
 export type WorkTimeSetting = Database['public']['Tables']['work_time_settings']['Row']
 export type Invitation = Database['public']['Tables']['invitations']['Row']
 export type PerformanceComment = Database['public']['Tables']['performance_comments']['Row']
+export type DailyLunchTime = Database['public']['Tables']['daily_lunch_times']['Row']
 
 // Insert/Update 타입
 export type MemberInsert = Database['public']['Tables']['members']['Insert']

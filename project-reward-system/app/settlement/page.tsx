@@ -6,6 +6,7 @@ import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import Modal from '@/components/Modal';
 import { SaveButton, DeleteButton } from '@/components/ActionButtons';
 import { getProjects, getReceipts, getProjectCategories, getMembers, getOpexList, getSchedules, getWorkTimeSetting, settleProject, unsettleProject } from '@/lib/api';
+import { getDailyLunchTimes } from '@/lib/api/settings';
 import type { Project, Receipt, ProjectCategory, Schedule, Opex, MemberWithRelations, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { format, differenceInDays } from 'date-fns';
 import { Star, Check } from 'lucide-react';
@@ -29,12 +30,27 @@ export default function SettlementPage() {
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
+  const [dailyLunchTimes, setDailyLunchTimes] = useState<Record<string, { start: string; end: string }>>({});
   const [isLoading, setIsLoading] = useState(true);
 
   // 업무시간 설정 (기본값: 09:30 ~ 18:30)
   const workHours = {
     start: workTimeSetting?.work_start_time || '09:30',
     end: workTimeSetting?.work_end_time || '18:30',
+  };
+
+  // 기본 점심시간 설정 (기본값: 12:00 ~ 13:00)
+  const defaultLunchHours = {
+    start: workTimeSetting?.lunch_start_time || '12:00',
+    end: workTimeSetting?.lunch_end_time || '13:00',
+  };
+
+  // 특정 날짜의 점심시간 가져오기
+  const getLunchHoursForDate = (date: string) => {
+    if (dailyLunchTimes[date]) {
+      return dailyLunchTimes[date];
+    }
+    return defaultLunchHours;
   };
 
   useEffect(() => {
@@ -56,6 +72,28 @@ export default function SettlementPage() {
         setOpexes(opexData);
         setSchedules(schedulesData);
         setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
+
+        // 스케줄 날짜 범위에서 일별 점심시간 로드
+        const schedulesList = schedulesData as Schedule[];
+        if (schedulesList.length > 0) {
+          const dates = schedulesList.map(s => s.date).sort();
+          const startDate = dates[0];
+          const endDate = dates[dates.length - 1];
+
+          try {
+            const lunchTimesData = await getDailyLunchTimes(startDate, endDate);
+            const lunchTimesMap: Record<string, { start: string; end: string }> = {};
+            lunchTimesData.forEach((lt: any) => {
+              lunchTimesMap[lt.date] = {
+                start: lt.start_time,
+                end: lt.end_time,
+              };
+            });
+            setDailyLunchTimes(lunchTimesMap);
+          } catch (err) {
+            console.error('Failed to load daily lunch times:', err);
+          }
+        }
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -146,15 +184,16 @@ export default function SettlementPage() {
       // 개인 연봉 비중
       const salaryRatio = totalAnnualSalary > 0 ? member.annual_salary / totalAnnualSalary : 0;
 
-      // 스케줄을 월별로 그룹화 (업무시간 내 유효 분만 계산)
+      // 스케줄을 월별로 그룹화 (업무시간 내 유효 분만 계산, 점심시간 제외)
       const schedulesByMonth: { [yearMonth: string]: { minutes: number } } = {};
       memberSchedules.forEach((s) => {
         const yearMonth = getYearMonthFromDate(s.date);
         if (!schedulesByMonth[yearMonth]) {
           schedulesByMonth[yearMonth] = { minutes: 0 };
         }
-        // 업무시간 내 유효 분만 계산
-        schedulesByMonth[yearMonth].minutes += calculateEffectiveMinutes(s, workHours);
+        // 업무시간 내 유효 분만 계산 (점심시간 제외)
+        const lunchHours = getLunchHoursForDate(s.date);
+        schedulesByMonth[yearMonth].minutes += calculateEffectiveMinutes(s, workHours, lunchHours);
       });
 
       // 각 월별로 계산

@@ -40,6 +40,14 @@ export default function MembersPage() {
     return member.role === 'admin' || member.role === 'manager';
   };
 
+  // 팀/직급 수정 가능 여부 확인 (팀관리자는 다른 팀관리자/총괄관리자 수정 불가)
+  const canEditMemberRole = (member: MemberWithRelations) => {
+    if (isFullAdmin) return true; // 총괄관리자는 모두 수정 가능
+    if (!isManager) return false; // 일반사원은 수정 불가
+    // 팀관리자인 경우: 일반 사원만 수정 가능 (다른 팀관리자/총괄관리자는 수정 불가)
+    return member.role === 'user';
+  };
+
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeam, setSelectedTeam] = useState('all');
@@ -364,7 +372,7 @@ export default function MembersPage() {
                 <td className="px-4 py-3 text-left text-gray-700">{member.name}</td>
                 {/* 팀 */}
                 <td className="px-4 py-3 text-left">
-                  {isAdminOrManager ? (
+                  {canEditMemberRole(member) ? (
                     <select
                       value={getValue(member, 'team_id') as string || ''}
                       onChange={(e) => handleFieldChange(member.id, 'team_id', e.target.value)}
@@ -383,7 +391,7 @@ export default function MembersPage() {
                 </td>
                 {/* 직급 */}
                 <td className="px-4 py-3 text-left">
-                  {isAdminOrManager ? (
+                  {canEditMemberRole(member) ? (
                     <select
                       value={getValue(member, 'role') as string}
                       onChange={(e) => handleFieldChange(member.id, 'role', e.target.value)}

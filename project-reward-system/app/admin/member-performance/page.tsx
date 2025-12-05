@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getProjects, getMembers, getOpexList, getSchedules, getWorkTimeSetting } from '@/lib/api';
+import { getDailyLunchTimes } from '@/lib/api/settings';
 import type { Project, Opex, MemberWithRelations, Schedule, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { ChevronDown, ChevronRight, User, Briefcase, TrendingUp, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
@@ -21,12 +22,27 @@ export default function MemberPerformancePage() {
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
+  const [dailyLunchTimes, setDailyLunchTimes] = useState<Record<string, { start: string; end: string }>>({});
   const [isLoading, setIsLoading] = useState(true);
 
   // 업무시간 설정 (기본값: 09:30 ~ 18:30)
   const workHours = {
     start: workTimeSetting?.work_start_time || '09:30',
     end: workTimeSetting?.work_end_time || '18:30',
+  };
+
+  // 기본 점심시간 설정 (기본값: 12:00 ~ 13:00)
+  const defaultLunchHours = {
+    start: workTimeSetting?.lunch_start_time || '12:00',
+    end: workTimeSetting?.lunch_end_time || '13:00',
+  };
+
+  // 특정 날짜의 점심시간 가져오기
+  const getLunchHoursForDate = (date: string) => {
+    if (dailyLunchTimes[date]) {
+      return dailyLunchTimes[date];
+    }
+    return defaultLunchHours;
   };
 
   // 권한 체크 - admin만 접근 가능
@@ -50,8 +66,30 @@ export default function MemberPerformancePage() {
         setProjects(projectsData);
         setMembers(membersData);
         setOpexes(opexData);
-        setSchedules(schedulesData);
+        setSchedules(schedulesData as Schedule[]);
         setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
+
+        // 스케줄 날짜 범위에서 일별 점심시간 로드
+        const schedulesList = schedulesData as Schedule[];
+        if (schedulesList.length > 0) {
+          const dates = schedulesList.map(s => s.date).sort();
+          const startDate = dates[0];
+          const endDate = dates[dates.length - 1];
+
+          try {
+            const lunchTimesData = await getDailyLunchTimes(startDate, endDate);
+            const lunchTimesMap: Record<string, { start: string; end: string }> = {};
+            lunchTimesData.forEach((lt: any) => {
+              lunchTimesMap[lt.date] = {
+                start: lt.start_time,
+                end: lt.end_time,
+              };
+            });
+            setDailyLunchTimes(lunchTimesMap);
+          } catch (err) {
+            console.error('Failed to load daily lunch times:', err);
+          }
+        }
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -97,12 +135,13 @@ export default function MemberPerformancePage() {
 
           const plannedDays = allocation.planned_days || 0;
 
-          // 실제 투입 시간 계산 (업무시간 내 유효 분만)
+          // 실제 투입 시간 계산 (업무시간 내 유효 분만, 점심시간 제외)
           const memberSchedules = schedules.filter(
             (s) => s.member_id === member.id && s.project_id === project.id
           );
           const actualMinutes = memberSchedules.reduce((sum, s) => {
-            return sum + calculateEffectiveMinutes(s, workHours);
+            const lunchHours = getLunchHoursForDate(s.date);
+            return sum + calculateEffectiveMinutes(s, workHours, lunchHours);
           }, 0);
           const actualDays = actualMinutes / 480;
 

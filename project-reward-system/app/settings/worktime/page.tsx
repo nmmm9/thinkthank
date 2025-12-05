@@ -28,6 +28,8 @@ export default function WorkTimePage() {
   const [workMinutes, setWorkMinutes] = useState(480);
   const [workStartTime, setWorkStartTime] = useState('09:30');
   const [workEndTime, setWorkEndTime] = useState('18:30');
+  const [lunchStartTime, setLunchStartTime] = useState('12:00');
+  const [lunchEndTime, setLunchEndTime] = useState('13:00');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -44,6 +46,8 @@ export default function WorkTimePage() {
           setWorkMinutes(settingData.work_minutes_per_day);
           setWorkStartTime(settingData.work_start_time || '09:30');
           setWorkEndTime(settingData.work_end_time || '18:30');
+          setLunchStartTime(settingData.lunch_start_time || '12:00');
+          setLunchEndTime(settingData.lunch_end_time || '13:00');
         }
       } catch (error) {
         console.error('Failed to load data:', error);
@@ -64,6 +68,8 @@ export default function WorkTimePage() {
         work_minutes_per_day: workMinutes,
         work_start_time: workStartTime,
         work_end_time: workEndTime,
+        lunch_start_time: lunchStartTime,
+        lunch_end_time: lunchEndTime,
       });
       setWorkTimeSetting(updated as WorkTimeSetting);
       alert('저장되었습니다.');
@@ -172,6 +178,31 @@ export default function WorkTimePage() {
               </div>
               <p className="text-xs text-gray-500 mt-1">
                 이 시간 내의 스케줄만 성과 계산에 포함됩니다.
+              </p>
+            </div>
+
+            {/* 점심시간 */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                점심시간
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={lunchStartTime}
+                  onChange={(e) => setLunchStartTime(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+                <span className="text-sm text-gray-600">~</span>
+                <input
+                  type="time"
+                  value={lunchEndTime}
+                  onChange={(e) => setLunchEndTime(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                스케줄에 기본 점심시간으로 표시됩니다.
               </p>
             </div>
 
