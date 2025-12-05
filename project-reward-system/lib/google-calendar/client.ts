@@ -81,7 +81,8 @@ export async function getCalendarEvents(
   let pageToken: string | undefined;
   let nextSyncToken: string | undefined;
   const maxTotalEvents = options?.maxResults || Infinity;
-  const pageSize = Math.min(250, maxTotalEvents); // 페이지당 최대 250개 (타임아웃 방지)
+  // 페이지당 2500개 (Google API 최대값) - 적은 요청으로 빠르게 가져오기
+  const pageSize = Math.min(2500, maxTotalEvents === Infinity ? 2500 : maxTotalEvents);
 
   do {
     const params = new URLSearchParams();
@@ -97,8 +98,8 @@ export async function getCalendarEvents(
       params.append('orderBy', 'startTime');
     }
 
-    // 남은 필요 이벤트 수만큼만 요청
-    const remaining = maxTotalEvents - allItems.length;
+    // 남은 필요 이벤트 수만큼만 요청 (최대 pageSize)
+    const remaining = maxTotalEvents === Infinity ? pageSize : maxTotalEvents - allItems.length;
     params.append('maxResults', String(Math.min(pageSize, remaining)));
 
     if (pageToken) {

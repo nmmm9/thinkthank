@@ -17,6 +17,7 @@ interface HistorySyncProgress {
   completedMonths: number;
   totalEvents: number;
   error?: string;
+  failedMonths?: string[]; // 실패한 월 목록
 }
 
 export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
@@ -211,6 +212,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
       const totalMonths = months.length;
       let totalEvents = 0;
       let completedMonths = 0;
+      const failedMonths: string[] = [];
 
       setHistorySyncProgress({
         isRunning: true,
@@ -218,6 +220,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
         totalMonths,
         completedMonths: 0,
         totalEvents: 0,
+        failedMonths: [],
       });
 
       // 월별로 동기화
@@ -235,39 +238,56 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
           ...prev!,
           currentPeriod: periodStr,
           completedMonths,
+          failedMonths: [...failedMonths],
         }));
 
-        const response = await fetch('/api/calendar/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            memberId: member.id,
-            accessToken,
-            calendarId: settings.google_calendar_id,
-            syncOptions: {
-              startDate: startStr,
-              endDate: endStr,
-              // maxResults 제거 - 월별 전체 이벤트 가져오기
-              isHistorySync: completedMonths > 3, // 미래 3개월 이후는 히스토리 모드
-            },
-          }),
-        });
+        try {
+          const response = await fetch('/api/calendar/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              memberId: member.id,
+              accessToken,
+              calendarId: settings.google_calendar_id,
+              syncOptions: {
+                startDate: startStr,
+                endDate: endStr,
+                isHistorySync: completedMonths > 3, // 미래 3개월 이후는 히스토리 모드
+              },
+            }),
+          });
 
-        const data = await response.json();
-        completedMonths++;
+          // 응답이 성공적이지 않으면 에러 처리
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
 
-        if (data.error) {
-          console.error(`Sync error for ${periodStr}:`, data.error);
-        } else {
-          // fetched (가져온 수) + created (생성된 수) 모두 카운트
-          totalEvents += data.stats?.fetched || 0;
-          console.log(`${periodStr}: ${data.stats?.fetched || 0}개 가져옴, ${data.stats?.created || 0}개 생성`);
+          const data = await response.json();
+
+          if (data.error) {
+            console.error(`Sync error for ${periodStr}:`, data.error);
+            failedMonths.push(`${periodStr} (${data.error})`);
+          } else {
+            // fetched (가져온 수) 카운트
+            const fetched = data.stats?.fetched || 0;
+            const created = data.stats?.created || 0;
+            totalEvents += fetched;
+            console.log(`${periodStr}: ${fetched}개 가져옴, ${created}개 생성`);
+          }
+        } catch (fetchError: any) {
+          // 네트워크 오류, 타임아웃, JSON 파싱 오류 등
+          console.error(`Failed to sync ${periodStr}:`, fetchError);
+          failedMonths.push(`${periodStr} (${fetchError.message || '연결 오류'})`);
+          // 계속 다음 월 진행
         }
+
+        completedMonths++;
 
         setHistorySyncProgress((prev) => ({
           ...prev!,
           completedMonths,
           totalEvents,
+          failedMonths: [...failedMonths],
         }));
 
         // API 제한 방지 (100ms 대기)
@@ -280,6 +300,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
         totalMonths,
         completedMonths: totalMonths,
         totalEvents,
+        failedMonths: failedMonths.length > 0 ? failedMonths : undefined,
       });
 
       onSyncComplete?.();

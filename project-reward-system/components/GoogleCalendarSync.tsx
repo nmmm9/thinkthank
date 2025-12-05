@@ -361,6 +361,12 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
                   <p className="text-xs text-purple-600 mt-1">
                     {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
                   </p>
+                  {/* 진행 중 실패한 월 표시 */}
+                  {historySyncProgress.failedMonths && historySyncProgress.failedMonths.length > 0 && (
+                    <p className="text-xs text-orange-500 mt-1">
+                      ⚠️ {historySyncProgress.failedMonths.length}개 월 실패
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -370,6 +376,19 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
                   <p className="text-xs text-green-700">
                     완료! {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
                   </p>
+                  {/* 실패한 월 표시 */}
+                  {historySyncProgress.failedMonths && historySyncProgress.failedMonths.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-green-200">
+                      <p className="text-xs text-orange-600 font-medium">
+                        ⚠️ {historySyncProgress.failedMonths.length}개 월 동기화 실패:
+                      </p>
+                      <ul className="mt-1 text-xs text-orange-500 list-disc list-inside max-h-20 overflow-y-auto">
+                        {historySyncProgress.failedMonths.map((month, i) => (
+                          <li key={i}>{month}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -453,6 +472,33 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
                 <p className="text-xs text-blue-600 mt-1">
                   {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
                 </p>
+                {/* 진행 중 실패한 월 표시 */}
+                {historySyncProgress.failedMonths && historySyncProgress.failedMonths.length > 0 && (
+                  <p className="text-xs text-orange-500 mt-1">
+                    ⚠️ {historySyncProgress.failedMonths.length}개 월 실패
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* 완료 후 상태 (연동 안됨 상태에서 동기화 완료 시) */}
+            {historySyncProgress && !historySyncProgress.isRunning && historySyncProgress.completedMonths > 0 && (
+              <div className="mt-2 bg-green-50 rounded p-2">
+                <p className="text-xs text-green-700">
+                  완료! {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
+                </p>
+                {historySyncProgress.failedMonths && historySyncProgress.failedMonths.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-green-200">
+                    <p className="text-xs text-orange-600 font-medium">
+                      ⚠️ {historySyncProgress.failedMonths.length}개 월 동기화 실패:
+                    </p>
+                    <ul className="mt-1 text-xs text-orange-500 list-disc list-inside max-h-20 overflow-y-auto">
+                      {historySyncProgress.failedMonths.map((month, i) => (
+                        <li key={i}>{month}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </div>

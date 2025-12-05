@@ -149,33 +149,42 @@ async function handleFullSync(
 
     // 4. 동기화 날짜 범위 설정
     const now = new Date();
-    let timeMin: Date;
-    let timeMax: Date;
+    let timeMinStr: string;
+    let timeMaxStr: string;
+    let dateMinStr: string; // DB 쿼리용 (YYYY-MM-DD)
+    let dateMaxStr: string;
 
     if (syncOptions?.startDate && syncOptions?.endDate) {
-      // 사용자 지정 범위 (히스토리 동기화용)
-      timeMin = new Date(syncOptions.startDate);
-      timeMax = new Date(syncOptions.endDate);
+      // 사용자 지정 범위 (히스토리 동기화용) - 직접 문자열 사용
+      timeMinStr = `${syncOptions.startDate}T00:00:00+09:00`; // 한국 시간 기준
+      timeMaxStr = `${syncOptions.endDate}T00:00:00+09:00`;
+      dateMinStr = syncOptions.startDate;
+      dateMaxStr = syncOptions.endDate;
     } else {
       // 기본 범위: 6개월 전 ~ 3개월 후
-      timeMin = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
-      timeMax = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+      const timeMin = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+      const timeMax = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+      timeMinStr = timeMin.toISOString();
+      timeMaxStr = timeMax.toISOString();
+      dateMinStr = timeMinStr.split('T')[0];
+      dateMaxStr = timeMaxStr.split('T')[0];
     }
 
-    // 페이지네이션으로 이벤트 가져오기 (주별 동기화는 제한 없음)
+    // 페이지네이션으로 이벤트 가져오기 (제한 없음)
+    console.log(`[Sync] Fetching events: ${timeMinStr} ~ ${timeMaxStr}`);
     const calendarEvents = await getCalendarEvents(accessToken, calendarId, {
-      timeMin: timeMin.toISOString(),
-      timeMax: timeMax.toISOString(),
-      maxResults: syncOptions?.maxResults, // 없으면 무제한
+      timeMin: timeMinStr,
+      timeMax: timeMaxStr,
     });
+    console.log(`[Sync] Fetched ${calendarEvents.items?.length || 0} events for range ${dateMinStr} ~ ${dateMaxStr}`);
 
     // 5. 기존 스케줄 가져오기 (동기화 범위 내)
     const { data: existingSchedules } = await supabase
       .from('schedules')
       .select('*')
       .eq('member_id', memberId)
-      .gte('date', timeMin.toISOString().split('T')[0])
-      .lte('date', timeMax.toISOString().split('T')[0]);
+      .gte('date', dateMinStr)
+      .lte('date', dateMaxStr);
 
     const scheduleByGoogleId = new Map(
       existingSchedules?.filter((s) => s.google_event_id).map((s) => [s.google_event_id, s]) || []
@@ -322,8 +331,8 @@ async function handleFullSync(
         updated,
         deleted,
         syncRange: {
-          from: timeMin.toISOString().split('T')[0],
-          to: timeMax.toISOString().split('T')[0],
+          from: dateMinStr,
+          to: dateMaxStr,
         },
         isHistorySync: syncOptions?.isHistorySync || false,
       },
