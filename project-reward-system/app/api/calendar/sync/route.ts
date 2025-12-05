@@ -189,14 +189,17 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
         projectId = projectMap.get(scheduleData.projectName) || null;
       }
 
-      // 시간 계산
-      const startParts = scheduleData.start_time.split(':').map(Number);
-      const endParts = scheduleData.end_time.split(':').map(Number);
-      const minutes = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
+      // 시간 계산 (종일 이벤트는 minutes = 0)
+      let minutes = 0;
+      if (!scheduleData.is_all_day && scheduleData.start_time && scheduleData.end_time) {
+        const startParts = scheduleData.start_time.split(':').map(Number);
+        const endParts = scheduleData.end_time.split(':').map(Number);
+        minutes = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
+      }
 
       if (existingSchedule) {
         // 기존 스케줄 업데이트 준비
-        const googleUpdated = new Date(event.updated || event.start.dateTime);
+        const googleUpdated = new Date(event.updated || event.start.dateTime || (event.start as any).date);
         const scheduleUpdated = new Date(existingSchedule.updated_at);
 
         if (googleUpdated > scheduleUpdated) {

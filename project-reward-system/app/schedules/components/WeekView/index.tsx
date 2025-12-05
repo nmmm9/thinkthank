@@ -78,10 +78,72 @@ export function WeekView({
     }
   }, []);
 
+  // 종일 이벤트와 시간 이벤트 분리
+  const getTimedSchedules = (date: Date) => {
+    return getDaySchedules(date).filter((s) => s.start_time !== null);
+  };
+
+  const getAllDaySchedules = (date: Date) => {
+    return getDaySchedules(date).filter((s) => s.start_time === null);
+  };
+
+  // 이번 주에 종일 이벤트가 있는지 확인
+  const hasAnyAllDayEvents = weekDays.some((day) => getAllDaySchedules(day).length > 0);
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-white">
       {/* 요일 헤더 */}
       <WeekHeader weekDays={weekDays} />
+
+      {/* 종일 이벤트 행 (종일 이벤트가 있을 때만 표시) */}
+      {hasAnyAllDayEvents && (
+        <div className="flex border-b border-gray-200 bg-gray-50">
+          {/* 시간 라벨 영역 (빈 공간) */}
+          <div className="w-16 flex-shrink-0 px-2 py-1 text-xs text-gray-500 text-right">
+            종일
+          </div>
+          {/* 각 요일의 종일 이벤트 */}
+          {weekDays.map((day) => {
+            const dateStr = format(day, 'yyyy-MM-dd');
+            const allDayEvents = getAllDaySchedules(day);
+            return (
+              <div
+                key={`allday-${dateStr}`}
+                className="flex-1 border-l border-gray-200 px-1 py-1 min-h-[28px] flex flex-wrap gap-1"
+              >
+                {allDayEvents.map((schedule) => {
+                  const project = projects.find((p) => p.id === schedule.project_id);
+                  const color = getMemberColor(schedule.member_id);
+                  return (
+                    <div
+                      key={schedule.id}
+                      className="text-xs px-2 py-0.5 rounded truncate max-w-full cursor-pointer hover:opacity-80"
+                      style={{
+                        backgroundColor: color.bg,
+                        color: color.text,
+                        border: `1px solid ${color.hex}`,
+                      }}
+                      title={schedule.description || '종일 이벤트'}
+                      onClick={() => {
+                        const scheduleMember = teamMembers.find((m) => m.id === schedule.member_id);
+                        if (scheduleMember) {
+                          setViewingSchedule({
+                            schedule,
+                            member: scheduleMember,
+                            project: project || null,
+                          });
+                        }
+                      }}
+                    >
+                      {schedule.description || '(제목 없음)'}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* 타임라인 그리드 */}
       <div ref={timelineRef} className="flex-1 overflow-auto">
@@ -89,7 +151,7 @@ export function WeekView({
           {/* 시간 라벨 */}
           <TimeColumn workTimeSetting={workTimeSetting} />
 
-          {/* 각 요일 컬럼 */}
+          {/* 각 요일 컬럼 (시간 이벤트만) */}
           {weekDays.map((day) => {
             const dateStr = format(day, 'yyyy-MM-dd');
             const lunchTime = getLunchTimeForDate(dateStr);
@@ -97,7 +159,7 @@ export function WeekView({
               <DayColumn
                 key={dateStr}
                 day={day}
-                daySchedules={getDaySchedules(day)}
+                daySchedules={getTimedSchedules(day)}
                 projects={projects}
                 teamMembers={teamMembers}
                 member={member}

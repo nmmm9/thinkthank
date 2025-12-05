@@ -257,23 +257,39 @@ export function scheduleToGoogleEvent(
 // Google Calendar 이벤트 -> 스케줄 데이터 변환
 export function googleEventToScheduleData(event: GoogleCalendarEvent): {
   date: string;
-  start_time: string;
-  end_time: string;
+  start_time: string | null;
+  end_time: string | null;
   description: string;
   projectName: string | null;
   projectId: string | null;
   google_event_id: string;
   is_google_read_only: boolean;
+  is_all_day: boolean;
 } {
-  // ISO 문자열에서 직접 날짜/시간 추출 (서버 시간대 영향 없음)
-  // 형식: 2025-01-15T09:00:00+09:00 또는 2025-01-15T09:00:00
-  const startStr = event.start.dateTime;
-  const endStr = event.end.dateTime;
+  // 종일 이벤트와 시간 이벤트 구분
+  // 종일 이벤트: event.start.date = "2025-01-15" (dateTime은 undefined)
+  // 시간 이벤트: event.start.dateTime = "2025-01-15T09:00:00+09:00"
+  const isAllDayEvent = !event.start.dateTime;
 
-  // T 앞부분이 날짜, T와 + 또는 : 사이가 시간
-  const date = startStr.split('T')[0]; // 2025-01-15
-  const start_time = startStr.split('T')[1]?.slice(0, 5) || '09:00'; // 09:00
-  const end_time = endStr.split('T')[1]?.slice(0, 5) || '18:00'; // 18:00
+  let date: string;
+  let start_time: string | null;
+  let end_time: string | null;
+
+  if (isAllDayEvent) {
+    // 종일 이벤트: 시간 없이 날짜만, minutes = 0으로 처리
+    date = (event.start as any).date || new Date().toISOString().split('T')[0];
+    start_time = null;
+    end_time = null;
+  } else {
+    // 시간 이벤트
+    const startStr = event.start.dateTime;
+    const endStr = event.end.dateTime;
+
+    // T 앞부분이 날짜, T와 + 또는 : 사이가 시간
+    date = startStr.split('T')[0]; // 2025-01-15
+    start_time = startStr.split('T')[1]?.slice(0, 5) || '09:00'; // 09:00
+    end_time = endStr.split('T')[1]?.slice(0, 5) || '18:00'; // 18:00
+  }
 
   // 제목에서 프로젝트명 파싱: [프로젝트명] 설명
   let projectName: string | null = null;
@@ -309,6 +325,7 @@ export function googleEventToScheduleData(event: GoogleCalendarEvent): {
     projectId: event.extendedProperties?.private?.projectId || null,
     google_event_id: event.id || '',
     is_google_read_only: isReadOnly,
+    is_all_day: isAllDayEvent,
   };
 }
 
