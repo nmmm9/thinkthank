@@ -162,7 +162,12 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
     let updated = 0;
     let deleted = 0;
 
-    // 6. Google Calendar 이벤트 -> 스케줄 동기화
+    // 배치 처리를 위한 배열
+    const toInsert: any[] = [];
+    const toUpdate: { id: string; data: any }[] = [];
+    const toDeleteIds: string[] = [];
+
+    // 6. Google Calendar 이벤트 -> 스케줄 동기화 (배치 준비)
     for (const event of calendarEvents.items || []) {
       if (!event.id) continue;
 
@@ -171,11 +176,7 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
       // 삭제된 이벤트 처리 (Google Calendar에서 삭제됨)
       if (event.status === 'cancelled') {
         if (existingSchedule) {
-          await supabase
-            .from('schedules')
-            .delete()
-            .eq('id', existingSchedule.id);
-          deleted++;
+          toDeleteIds.push(existingSchedule.id);
         }
         continue;
       }
@@ -194,14 +195,14 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
       const minutes = (endParts[0] * 60 + endParts[1]) - (startParts[0] * 60 + startParts[1]);
 
       if (existingSchedule) {
-        // 기존 스케줄 업데이트
+        // 기존 스케줄 업데이트 준비
         const googleUpdated = new Date(event.updated || event.start.dateTime);
         const scheduleUpdated = new Date(existingSchedule.updated_at);
 
         if (googleUpdated > scheduleUpdated) {
-          await supabase
-            .from('schedules')
-            .update({
+          toUpdate.push({
+            id: existingSchedule.id,
+            data: {
               date: scheduleData.date,
               start_time: scheduleData.start_time,
               end_time: scheduleData.end_time,
@@ -210,13 +211,12 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
               project_id: projectId,
               is_google_read_only: scheduleData.is_google_read_only,
               updated_at: new Date().toISOString(),
-            })
-            .eq('id', existingSchedule.id);
-          updated++;
+            },
+          });
         }
       } else {
-        // 새 스케줄 생성
-        await supabase.from('schedules').insert({
+        // 새 스케줄 생성 준비
+        toInsert.push({
           org_id: member.org_id,
           member_id: memberId,
           project_id: projectId,
@@ -228,30 +228,50 @@ async function handleFullSync(accessToken: string, calendarId: string, memberId:
           google_event_id: event.id,
           is_google_read_only: scheduleData.is_google_read_only,
         });
-        created++;
       }
     }
 
-    // 7. Google Calendar에서 삭제된 스케줄 감지 및 삭제
-    // syncToken 증분 동기화에서 cancelled 이벤트를 못 받는 경우를 대비해
-    // 항상 전체 비교로 삭제 감지
+    // 7. Google Calendar에서 삭제된 스케줄 감지
     const activeGoogleEventIds = new Set(
       (calendarEvents.items || [])
         .filter((e) => e.id && e.status !== 'cancelled')
         .map((e) => e.id)
     );
 
-    // google_event_id가 있지만 Google Calendar에 없는 스케줄 삭제
-    const schedulesToDelete = existingSchedules?.filter(
+    // google_event_id가 있지만 Google Calendar에 없는 스케줄
+    const orphanedSchedules = existingSchedules?.filter(
       (s) => s.google_event_id && !activeGoogleEventIds.has(s.google_event_id)
     ) || [];
 
-    for (const schedule of schedulesToDelete) {
-      await supabase
+    orphanedSchedules.forEach((s) => toDeleteIds.push(s.id));
+
+    // 8. 배치 INSERT (100개씩)
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const batch = toInsert.slice(i, i + BATCH_SIZE);
+      const { error } = await supabase.from('schedules').insert(batch);
+      if (!error) created += batch.length;
+    }
+
+    // 9. 배치 UPDATE (Promise.all로 병렬 처리, 10개씩)
+    const UPDATE_BATCH_SIZE = 10;
+    for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH_SIZE) {
+      const batch = toUpdate.slice(i, i + UPDATE_BATCH_SIZE);
+      await Promise.all(
+        batch.map(({ id, data }) =>
+          supabase.from('schedules').update(data).eq('id', id)
+        )
+      );
+      updated += batch.length;
+    }
+
+    // 10. 배치 DELETE
+    if (toDeleteIds.length > 0) {
+      const { error } = await supabase
         .from('schedules')
         .delete()
-        .eq('id', schedule.id);
-      deleted++;
+        .in('id', toDeleteIds);
+      if (!error) deleted = toDeleteIds.length;
     }
 
     // 8. 스케줄 -> Google Calendar 동기화는 개별 저장 시(saveSchedules)에만 처리
