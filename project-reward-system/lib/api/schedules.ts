@@ -10,7 +10,8 @@ export async function getSchedules() {
       project:projects(*),
       member:members(*)
     `)
-    .order('date', { ascending: false });
+    .order('date', { ascending: false })
+    .limit(100000); // Supabase 기본 1000 제한 해제
 
   if (error) throw error;
   return data;

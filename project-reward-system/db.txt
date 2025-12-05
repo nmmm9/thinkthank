@@ -13,6 +13,17 @@ CREATE TABLE public.calendar_sync_settings (
   CONSTRAINT calendar_sync_settings_pkey PRIMARY KEY (id),
   CONSTRAINT calendar_sync_settings_member_id_fkey FOREIGN KEY (member_id) REFERENCES public.members(id)
 );
+CREATE TABLE public.daily_lunch_times (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  org_id uuid NOT NULL,
+  date date NOT NULL,
+  start_time text DEFAULT '12:00'::text,
+  end_time text DEFAULT '13:00'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT daily_lunch_times_pkey PRIMARY KEY (id),
+  CONSTRAINT daily_lunch_times_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
+);
 CREATE TABLE public.expenses (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   org_id uuid NOT NULL,
@@ -219,6 +230,10 @@ CREATE TABLE public.work_time_settings (
   work_minutes_per_day integer DEFAULT 480,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
+  work_start_time text DEFAULT '09:30'::text,
+  work_end_time text DEFAULT '18:30'::text,
+  lunch_start_time text DEFAULT '12:00'::text,
+  lunch_end_time text DEFAULT '13:00'::text,
   CONSTRAINT work_time_settings_pkey PRIMARY KEY (id),
   CONSTRAINT work_time_settings_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id)
 );
