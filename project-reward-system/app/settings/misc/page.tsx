@@ -26,6 +26,9 @@ export default function MiscPage() {
   const [companyName, setCompanyName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+
+  // 권한 체크: admin 또는 manager만 접근 가능
+  const hasPermission = member?.role === 'admin' || member?.role === 'manager';
   const [isSavingCompany, setIsSavingCompany] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
@@ -261,6 +264,23 @@ export default function MiscPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  // 권한 없음
+  if (!hasPermission) {
+    return (
+      <div>
+        <PageHeader
+          title="기타설정"
+          description="프로젝트 구분, 회사정보 등을 설정할 수 있습니다."
+        />
+        <div className="bg-white rounded-lg shadow-sm p-8 text-center">
+          <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">접근 권한이 없습니다</h2>
+          <p className="text-gray-600">이 페이지는 관리자(팀장급 이상)만 접근할 수 있습니다.</p>
+        </div>
       </div>
     );
   }
