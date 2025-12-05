@@ -282,12 +282,23 @@ async function handleFullSync(
       orphanedSchedules.forEach((s) => toDeleteIds.push(s.id));
     }
 
+    console.log(`[Sync] To insert: ${toInsert.length}, To update: ${toUpdate.length}, To delete: ${toDeleteIds.length}`);
+
     // 8. 배치 INSERT (100개씩)
     const BATCH_SIZE = 100;
+    let insertErrors: string[] = [];
     for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
       const batch = toInsert.slice(i, i + BATCH_SIZE);
       const { error } = await supabase.from('schedules').insert(batch);
-      if (!error) created += batch.length;
+      if (error) {
+        console.error(`[Sync] Insert error at batch ${i / BATCH_SIZE + 1}:`, error.message);
+        insertErrors.push(error.message);
+      } else {
+        created += batch.length;
+      }
+    }
+    if (insertErrors.length > 0) {
+      console.error(`[Sync] Total insert errors: ${insertErrors.length}`);
     }
 
     // 9. 배치 UPDATE (Promise.all로 병렬 처리, 10개씩)
@@ -308,8 +319,14 @@ async function handleFullSync(
         .from('schedules')
         .delete()
         .in('id', toDeleteIds);
-      if (!error) deleted = toDeleteIds.length;
+      if (error) {
+        console.error(`[Sync] Delete error:`, error.message);
+      } else {
+        deleted = toDeleteIds.length;
+      }
     }
+
+    console.log(`[Sync] Results - Created: ${created}, Updated: ${updated}, Deleted: ${deleted}`);
 
     // 8. 스케줄 -> Google Calendar 동기화는 개별 저장 시(saveSchedules)에만 처리
     // 전체 동기화에서는 Google Calendar → 스케줄 방향만 처리 (중복 생성 방지)
