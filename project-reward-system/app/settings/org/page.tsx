@@ -21,7 +21,9 @@ interface EditableTeam extends Team {
 
 export default function OrgPage() {
   const { member } = useAuthStore();
-  const isFullAdmin = member?.role === 'admin'; // 총괄관리자만 수정 가능
+  const isFullAdmin = member?.role === 'admin'; // 총괄관리자
+  const isManager = member?.role === 'manager'; // 팀관리자
+  const isAdminOrManager = isFullAdmin || isManager; // 관리자급 (수정 가능)
 
   const [teams, setTeams] = useState<EditableTeam[]>([]);
   const [originalTeams, setOriginalTeams] = useState<EditableTeam[]>([]);
@@ -56,9 +58,9 @@ export default function OrgPage() {
     loadData();
   }, []);
 
-  // 페이지 이탈 경고 (브라우저 새로고침/닫기) - 총괄관리자만
+  // 페이지 이탈 경고 (브라우저 새로고침/닫기) - 관리자급
   useEffect(() => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasChanges) {
@@ -69,11 +71,11 @@ export default function OrgPage() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasChanges, isFullAdmin]);
+  }, [hasChanges, isAdminOrManager]);
 
   // 팀 추가
   const handleAddTeam = () => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
     const newTeam: EditableTeam = {
       id: `new-${Date.now()}`,
       org_id: '',
@@ -91,7 +93,7 @@ export default function OrgPage() {
 
   // 팀명 변경
   const handleNameChange = (teamId: string, value: string) => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
     setTeams(teams.map(t =>
       t.id === teamId ? { ...t, editedName: value } : t
     ));
@@ -99,7 +101,7 @@ export default function OrgPage() {
 
   // 활성 상태 변경
   const handleActiveChange = (teamId: string, checked: boolean) => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
     setTeams(teams.map(t =>
       t.id === teamId ? { ...t, editedIsActive: checked } : t
     ));
@@ -107,7 +109,7 @@ export default function OrgPage() {
 
   // 전체 저장
   const handleSaveAll = async () => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
 
     // 빈 이름 체크
     const emptyTeam = teams.find(t => !t.editedName.trim());
@@ -181,7 +183,7 @@ export default function OrgPage() {
 
   // 팀 삭제
   const handleDeleteTeam = async (team: EditableTeam) => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
 
     if (team.isNew) {
       setTeams(teams.filter(t => t.id !== team.id));
@@ -228,7 +230,7 @@ export default function OrgPage() {
         <div className="bg-white rounded-lg shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">팀 목록</h2>
-            {isFullAdmin && (
+            {isAdminOrManager && (
               <div className="flex items-center gap-2">
                 {hasChanges && (
                   <button
@@ -252,7 +254,7 @@ export default function OrgPage() {
                 <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">
                   활성여부
                 </th>
-                {isFullAdmin && (
+                {isAdminOrManager && (
                   <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">삭제</th>
                 )}
               </tr>
@@ -264,7 +266,7 @@ export default function OrgPage() {
                   className={`hover:bg-gray-50 ${isRowEdited(team) ? 'bg-yellow-50' : ''} ${team.isNew ? 'bg-blue-50' : ''}`}
                 >
                   <td className="px-4 py-3">
-                    {isFullAdmin ? (
+                    {isAdminOrManager ? (
                       <input
                         type="text"
                         value={team.editedName}
@@ -277,7 +279,7 @@ export default function OrgPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    {isFullAdmin ? (
+                    {isAdminOrManager ? (
                       <ToggleSwitch
                         checked={team.editedIsActive}
                         onChange={(checked) => handleActiveChange(team.id, checked)}
@@ -288,7 +290,7 @@ export default function OrgPage() {
                       </span>
                     )}
                   </td>
-                  {isFullAdmin && (
+                  {isAdminOrManager && (
                     <td className="px-4 py-3 text-center">
                       <DeleteButton onClick={() => handleDeleteTeam(team)} />
                     </td>

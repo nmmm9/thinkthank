@@ -27,9 +27,9 @@ const getRoleLabel = (role: string) => {
 
 export default function MembersPage() {
   const { member: currentUser } = useAuthStore();
-  const isFullAdmin = currentUser?.role === 'admin'; // 총괄관리자만 수정 가능
+  const isFullAdmin = currentUser?.role === 'admin'; // 총괄관리자
   const isManager = currentUser?.role === 'manager'; // 팀관리자
-  const isAdminOrManager = isFullAdmin || isManager; // 관리자급 (화면 표시용)
+  const isAdminOrManager = isFullAdmin || isManager; // 관리자급 (수정 가능)
 
   // 연봉 블러 처리 여부 확인 (팀관리자가 팀관리자 이상의 연봉을 볼 때, 본인 제외)
   const shouldBlurSalary = (member: MemberWithRelations) => {
@@ -78,9 +78,9 @@ export default function MembersPage() {
     loadData();
   }, []);
 
-  // 페이지 이탈 경고 (브라우저 새로고침/닫기) - 총괄관리자만
+  // 페이지 이탈 경고 (브라우저 새로고침/닫기) - 관리자급
   useEffect(() => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasChanges) {
@@ -91,7 +91,7 @@ export default function MembersPage() {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasChanges, isFullAdmin]);
+  }, [hasChanges, isAdminOrManager]);
 
   // 레벨 우선순위 (낮을수록 먼저)
   const getRolePriority = (role: string) => {
@@ -126,7 +126,7 @@ export default function MembersPage() {
 
   // 필드 변경 핸들러
   const handleFieldChange = (memberId: string, field: string, value: unknown) => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
     setEditedMembers((prev) => ({
       ...prev,
       [memberId]: {
@@ -138,7 +138,7 @@ export default function MembersPage() {
 
   // 전체 저장 핸들러
   const handleSaveAll = async () => {
-    if (!hasChanges || !isFullAdmin) return;
+    if (!hasChanges || !isAdminOrManager) return;
 
     setIsSaving(true);
     try {
@@ -184,7 +184,7 @@ export default function MembersPage() {
 
   // 삭제 핸들러
   const handleDelete = async (memberId: string) => {
-    if (!isFullAdmin) return;
+    if (!isAdminOrManager) return;
     if (!confirm('정말 삭제하시겠습니까?')) return;
 
     try {
@@ -321,7 +321,7 @@ export default function MembersPage() {
             onChange={setSearchQuery}
           />
         </FilterBar>
-        {isFullAdmin && hasChanges && (
+        {isAdminOrManager && hasChanges && (
           <button
             onClick={handleSaveAll}
             disabled={isSaving}
@@ -337,15 +337,15 @@ export default function MembersPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">팀원</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-32">팀</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-700 w-24">이름</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-700 w-32">팀</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-700 w-36">직급</th>
               <th className="px-4 py-3 text-center font-medium text-gray-700 w-40">연봉</th>
               <th className="px-4 py-3 text-left font-medium text-gray-700 max-w-[200px]">이메일</th>
               {isFullAdmin && (
                 <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">비밀번호</th>
               )}
-              <th className="px-4 py-3 text-center font-medium text-gray-700 w-28">레벨</th>
-              {isFullAdmin && (
+              {isAdminOrManager && (
                 <>
                   <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">승인</th>
                   <th className="px-4 py-3 text-center font-medium text-gray-700 w-24">활성</th>
@@ -360,9 +360,11 @@ export default function MembersPage() {
                 key={member.id}
                 className={`hover:bg-gray-50 ${isRowEdited(member.id) ? 'bg-yellow-50' : ''}`}
               >
-                <td className="px-4 py-3 text-center text-gray-700">{member.name}</td>
-                <td className="px-4 py-3 text-center">
-                  {isFullAdmin ? (
+                {/* 이름 */}
+                <td className="px-4 py-3 text-left text-gray-700">{member.name}</td>
+                {/* 팀 */}
+                <td className="px-4 py-3 text-left">
+                  {isAdminOrManager ? (
                     <select
                       value={getValue(member, 'team_id') as string || ''}
                       onChange={(e) => handleFieldChange(member.id, 'team_id', e.target.value)}
@@ -379,33 +381,9 @@ export default function MembersPage() {
                     <span className="text-gray-700">{getTeamName(member.team_id)}</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-center">
-                  {isFullAdmin ? (
-                    <input
-                      type="number"
-                      value={getValue(member, 'annual_salary') as number}
-                      onChange={(e) => handleFieldChange(member.id, 'annual_salary', parseInt(e.target.value) || 0)}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  ) : (
-                    <span className="text-gray-700">
-                      {shouldBlurSalary(member) ? '****' : `${(getValue(member, 'annual_salary') as number).toLocaleString()}원`}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" title={member.email}>{member.email}</td>
-                {isFullAdmin && (
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      className="p-1 text-gray-600 hover:text-primary transition-colors"
-                      title="비밀번호 수정"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  </td>
-                )}
-                <td className="px-4 py-3 text-center">
-                  {isFullAdmin ? (
+                {/* 직급 */}
+                <td className="px-4 py-3 text-left">
+                  {isAdminOrManager ? (
                     <select
                       value={getValue(member, 'role') as string}
                       onChange={(e) => handleFieldChange(member.id, 'role', e.target.value)}
@@ -419,7 +397,39 @@ export default function MembersPage() {
                     <span className="text-gray-700">{getRoleLabel(member.role)}</span>
                   )}
                 </td>
+                {/* 연봉 */}
+                <td className="px-4 py-3 text-center">
+                  {isAdminOrManager && !shouldBlurSalary(member) ? (
+                    <input
+                      type="text"
+                      value={(getValue(member, 'annual_salary') as number).toLocaleString()}
+                      onChange={(e) => {
+                        const numValue = parseInt(e.target.value.replace(/,/g, '')) || 0;
+                        handleFieldChange(member.id, 'annual_salary', numValue);
+                      }}
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  ) : (
+                    <span className="text-gray-700">
+                      {shouldBlurSalary(member) ? '********' : `${(getValue(member, 'annual_salary') as number).toLocaleString()}원`}
+                    </span>
+                  )}
+                </td>
+                {/* 이메일 */}
+                <td className="px-4 py-3 text-left text-gray-700 max-w-[200px] truncate" title={member.email}>{member.email}</td>
+                {/* 비밀번호 (총괄관리자만) */}
                 {isFullAdmin && (
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      className="p-1 text-gray-600 hover:text-primary transition-colors"
+                      title="비밀번호 수정"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </td>
+                )}
+                {/* 승인/활성/삭제 (관리자급) */}
+                {isAdminOrManager && (
                   <>
                     <td className="px-4 py-3 text-center">
                       <ToggleSwitch

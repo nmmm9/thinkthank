@@ -453,6 +453,8 @@ export interface Database {
           id: string
           org_id: string
           work_minutes_per_day: number
+          work_start_time: string
+          work_end_time: string
           created_at: string
           updated_at: string
         }
@@ -460,6 +462,8 @@ export interface Database {
           id?: string
           org_id: string
           work_minutes_per_day?: number
+          work_start_time?: string
+          work_end_time?: string
           created_at?: string
           updated_at?: string
         }
@@ -467,6 +471,8 @@ export interface Database {
           id?: string
           org_id?: string
           work_minutes_per_day?: number
+          work_start_time?: string
+          work_end_time?: string
           created_at?: string
           updated_at?: string
         }

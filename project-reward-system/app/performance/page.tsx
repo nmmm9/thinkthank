@@ -2,12 +2,12 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { getProjects, getMembers, getOpexList, getSchedules, getCommentsByMember, type PerformanceCommentWithRelations } from '@/lib/api';
-import type { Project, Opex, MemberWithRelations, Schedule } from '@/lib/supabase/database.types';
+import { getProjects, getMembers, getOpexList, getSchedules, getCommentsByMember, getWorkTimeSetting, type PerformanceCommentWithRelations } from '@/lib/api';
+import type { Project, Opex, MemberWithRelations, Schedule, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { ChevronDown, ChevronRight, Briefcase, MessageSquare, MessageCircle, Calendar, User } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
+import { getWorkingDaysInMonth, getYearMonthFromDate, calculateEffectiveMinutes } from '@/lib/utils/workdays';
 import { useAuthStore } from '@/lib/auth-store';
 import PerformanceCommentModal from '@/components/PerformanceCommentModal';
 import AnimatedCounter from '@/components/charts/AnimatedCounter';
@@ -28,7 +28,14 @@ export default function PerformancePage() {
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 업무시간 설정 (기본값: 09:30 ~ 18:30)
+  const workHours = {
+    start: workTimeSetting?.work_start_time || '09:30',
+    end: workTimeSetting?.work_end_time || '18:30',
+  };
 
   // 탭 상태
   const [activeTab, setActiveTab] = useState<'performance' | 'feedback'>('performance');
@@ -90,16 +97,18 @@ export default function PerformancePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [projectsData, membersData, opexData, schedulesData] = await Promise.all([
+        const [projectsData, membersData, opexData, schedulesData, workTimeData] = await Promise.all([
           getProjects(),
           getMembers(),
           getOpexList(),
           getSchedules(),
+          getWorkTimeSetting(),
         ]);
         setProjects(projectsData);
         setMembers(membersData);
         setOpexes(opexData);
         setSchedules(schedulesData);
+        setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -164,7 +173,10 @@ export default function PerformancePage() {
     const memberSchedules = schedules.filter(
       (s) => s.member_id === allocation.member_id && s.project_id === projectId
     );
-    const actualMinutes = memberSchedules.reduce((sum, s) => sum + s.minutes, 0);
+    // 업무시간 내 유효 분만 계산
+    const actualMinutes = memberSchedules.reduce((sum, s) => {
+      return sum + calculateEffectiveMinutes(s, workHours);
+    }, 0);
     const actualDays = actualMinutes / 480;
 
     const startDate = allocation.start_date || project.start_date;

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject, getMembers, updateMember } from '@/lib/api';
+import { getProjects, getSchedules, createSchedule, updateSchedule, deleteSchedule, updateProject, getMembers, updateMember, getWorkTimeSetting } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
-import type { Project, Schedule, Member } from '@/lib/supabase/database.types';
+import type { Project, Schedule, Member, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { SketchPicker } from 'react-color';
 import {
   format,
@@ -21,6 +21,7 @@ import { ChevronLeft, ChevronRight, Eye, EyeOff, Plus, X, Trash2, Palette, Users
 import GoogleCalendarSync from '@/components/GoogleCalendarSync';
 import { getUnclassifiedSchedules, assignProjectToSchedule } from '@/lib/api';
 import { useCalendarSync } from '@/hooks/useCalendarSync';
+import { isWorkingDay } from '@/lib/utils/workdays';
 
 // 타임라인 설정
 const HOUR_HEIGHT = 60; // 1시간 = 60px
@@ -79,6 +80,9 @@ export default function SchedulesPage() {
   const [showUnclassifiedModal, setShowUnclassifiedModal] = useState(false);
   const [assigningScheduleId, setAssigningScheduleId] = useState<string | null>(null);
 
+  // 업무시간 설정
+  const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
+
   const [scheduleEntries, setScheduleEntries] = useState<Array<{
     projectId: string;
     hours: string;
@@ -135,13 +139,15 @@ export default function SchedulesPage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [projectsData, schedulesData, membersData] = await Promise.all([
+        const [projectsData, schedulesData, membersData, workTimeData] = await Promise.all([
           getProjects(),
           getSchedules(),
           getMembers(),
+          getWorkTimeSetting(),
         ]);
         setProjects(projectsData as Project[]);
         setSchedules(schedulesData as Schedule[]);
+        setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
         setVisibleProjects(
           (projectsData as Project[]).reduce((acc, p) => ({ ...acc, [p.id]: true }), {})
         );
@@ -1648,25 +1654,40 @@ export default function SchedulesPage() {
             {/* 요일 헤더 */}
             <div className="flex border-b border-gray-200 bg-gray-50">
               <div className="w-16 flex-shrink-0" /> {/* 시간 컬럼 공간 */}
-              {weekDays.map((day) => (
-                <div
-                  key={format(day, 'yyyy-MM-dd')}
-                  className="flex-1 text-center py-3 border-l border-gray-200"
-                >
-                  <div className="text-xs text-gray-500 uppercase">
-                    {format(day, 'EEE', { locale: ko })}
-                  </div>
+              {weekDays.map((day) => {
+                const isNonWorkingDay = !isWorkingDay(day);
+                const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                return (
                   <div
-                    className={`text-lg font-medium mt-0.5 ${
-                      isToday(day)
-                        ? 'w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center mx-auto'
-                        : 'text-gray-900'
+                    key={format(day, 'yyyy-MM-dd')}
+                    className={`flex-1 text-center py-3 border-l border-gray-200 ${
+                      isNonWorkingDay ? 'bg-gray-100' : ''
                     }`}
                   >
-                    {format(day, 'd')}
+                    <div className={`text-xs uppercase ${
+                      isWeekend ? 'text-red-400' : isNonWorkingDay ? 'text-orange-400' : 'text-gray-500'
+                    }`}>
+                      {format(day, 'EEE', { locale: ko })}
+                      {isNonWorkingDay && !isWeekend && (
+                        <span className="ml-1 text-orange-400">휴</span>
+                      )}
+                    </div>
+                    <div
+                      className={`text-lg font-medium mt-0.5 ${
+                        isToday(day)
+                          ? 'w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center mx-auto'
+                          : isWeekend
+                            ? 'text-red-400'
+                            : isNonWorkingDay
+                              ? 'text-orange-400'
+                              : 'text-gray-900'
+                      }`}
+                    >
+                      {format(day, 'd')}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* 타임라인 그리드 */}
@@ -1674,15 +1695,56 @@ export default function SchedulesPage() {
               <div className="flex pt-2" style={{ height: TOTAL_HOURS * HOUR_HEIGHT + 16 }}>
                 {/* 시간 라벨 */}
                 <div className="w-16 flex-shrink-0 relative">
-                  {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => (
-                    <div
-                      key={i}
-                      className="absolute right-2 text-xs text-gray-500 whitespace-nowrap"
-                      style={{ top: i * HOUR_HEIGHT }}
-                    >
-                      {formatHourLabel(START_HOUR + i)}
-                    </div>
-                  ))}
+                  {/* 업무시간 외 영역 표시 */}
+                  {(() => {
+                    const workStart = workTimeSetting?.work_start_time || '09:30';
+                    const workEnd = workTimeSetting?.work_end_time || '18:30';
+                    const [startH, startM] = workStart.split(':').map(Number);
+                    const [endH, endM] = workEnd.split(':').map(Number);
+                    const workStartHour = startH + startM / 60;
+                    const workEndHour = endH + endM / 60;
+
+                    const beforeHeight = Math.max(0, (workStartHour - START_HOUR) * HOUR_HEIGHT);
+                    const afterTop = (workEndHour - START_HOUR) * HOUR_HEIGHT;
+                    const afterHeight = Math.max(0, (END_HOUR - workEndHour) * HOUR_HEIGHT);
+
+                    return (
+                      <>
+                        {beforeHeight > 0 && (
+                          <div
+                            className="absolute w-full bg-gray-100 opacity-50"
+                            style={{ top: 0, height: beforeHeight }}
+                          />
+                        )}
+                        {afterHeight > 0 && (
+                          <div
+                            className="absolute w-full bg-gray-100 opacity-50"
+                            style={{ top: afterTop, height: afterHeight }}
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
+                  {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
+                    const hour = START_HOUR + i;
+                    const workStart = workTimeSetting?.work_start_time || '09:30';
+                    const workEnd = workTimeSetting?.work_end_time || '18:30';
+                    const [startH] = workStart.split(':').map(Number);
+                    const [endH] = workEnd.split(':').map(Number);
+                    const isWorkHour = hour >= startH && hour < endH;
+
+                    return (
+                      <div
+                        key={i}
+                        className={`absolute right-2 text-xs whitespace-nowrap ${
+                          isWorkHour ? 'text-gray-700 font-medium' : 'text-gray-400'
+                        }`}
+                        style={{ top: i * HOUR_HEIGHT }}
+                      >
+                        {formatHourLabel(hour)}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* 각 요일 컬럼 */}
@@ -1692,18 +1754,84 @@ export default function SchedulesPage() {
 
                   const TOP_PADDING = 8; // pt-2 = 8px
                   const isCreatingOnThisDay = isCreating && createDay && format(createDay, 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd');
+                  const isNonWorkingDay = !isWorkingDay(day);
 
                   return (
                     <div
                       key={format(day, 'yyyy-MM-dd')}
                       data-day-column={format(day, 'yyyy-MM-dd')}
-                      className="flex-1 relative border-l border-gray-200"
+                      className={`flex-1 relative border-l border-gray-200 ${
+                        isNonWorkingDay ? 'bg-gray-50' : ''
+                      }`}
                       onMouseDown={(e) => {
                         // 빈 공간에서만 드래그 시작 (스케줄 블록이 아닌 경우)
                         if ((e.target as HTMLElement).closest('[data-schedule-block]')) return;
                         handleCreateDragStart(e, day, e.currentTarget as HTMLDivElement);
                       }}
                     >
+                      {/* 주말/공휴일 전체 배경 */}
+                      {isNonWorkingDay && (
+                        <div
+                          className="absolute inset-0 bg-gray-200 opacity-30 pointer-events-none"
+                          style={{ zIndex: 1 }}
+                        />
+                      )}
+                      {/* 업무시간 경계선 + 외 영역 표시 */}
+                      {(() => {
+                        const workStart = workTimeSetting?.work_start_time || '09:30';
+                        const workEnd = workTimeSetting?.work_end_time || '18:30';
+                        const [startH, startM] = workStart.split(':').map(Number);
+                        const [endH, endM] = workEnd.split(':').map(Number);
+                        const workStartHour = startH + startM / 60;
+                        const workEndHour = endH + endM / 60;
+
+                        // 업무시간 전 (START_HOUR ~ workStartHour)
+                        const beforeTop = TOP_PADDING;
+                        const beforeHeight = Math.max(0, (workStartHour - START_HOUR) * HOUR_HEIGHT);
+
+                        // 업무시간 후 (workEndHour ~ END_HOUR)
+                        const afterTop = TOP_PADDING + (workEndHour - START_HOUR) * HOUR_HEIGHT;
+                        const afterHeight = Math.max(0, (END_HOUR - workEndHour) * HOUR_HEIGHT);
+
+                        // 경계선 위치
+                        const startLineTop = TOP_PADDING + (workStartHour - START_HOUR) * HOUR_HEIGHT;
+                        const endLineTop = TOP_PADDING + (workEndHour - START_HOUR) * HOUR_HEIGHT;
+
+                        return (
+                          <>
+                            {/* 업무시간 외 영역 (연한 회색) */}
+                            {beforeHeight > 0 && (
+                              <div
+                                className="absolute w-full bg-gray-100 pointer-events-none opacity-40"
+                                style={{ top: beforeTop, height: beforeHeight }}
+                              />
+                            )}
+                            {afterHeight > 0 && (
+                              <div
+                                className="absolute w-full bg-gray-100 pointer-events-none opacity-40"
+                                style={{ top: afterTop, height: afterHeight }}
+                              />
+                            )}
+                            {/* 업무시간 시작 경계선 (파란 점선) */}
+                            <div
+                              className="absolute w-full pointer-events-none z-10"
+                              style={{
+                                top: startLineTop,
+                                borderTop: '2px dashed #3b82f6',
+                              }}
+                            />
+                            {/* 업무시간 종료 경계선 (파란 점선) */}
+                            <div
+                              className="absolute w-full pointer-events-none z-10"
+                              style={{
+                                top: endLineTop,
+                                borderTop: '2px dashed #3b82f6',
+                              }}
+                            />
+                          </>
+                        );
+                      })()}
+
                       {/* 시간 그리드 라인 */}
                       {Array.from({ length: TOTAL_HOURS }, (_, i) => (
                         <div
@@ -1902,7 +2030,9 @@ export default function SchedulesPage() {
               {/* 요일 헤더 */}
               <div className="grid grid-cols-7 gap-2 mb-2">
                 {['일', '월', '화', '수', '목', '금', '토'].map((day, idx) => (
-                  <div key={idx} className="text-center text-sm font-medium text-gray-600 py-2">
+                  <div key={idx} className={`text-center text-sm font-medium py-2 ${
+                    idx === 0 || idx === 6 ? 'text-red-400' : 'text-gray-600'
+                  }`}>
                     {day}
                   </div>
                 ))}
@@ -1917,6 +2047,8 @@ export default function SchedulesPage() {
 
                   {calendarDays.map((day) => {
                     const daySchedules = getDaySchedules(day);
+                    const isNonWorkingDay = !isWorkingDay(day);
+                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                     return (
                       <div
@@ -1924,13 +2056,26 @@ export default function SchedulesPage() {
                         className={`h-24 rounded-lg border cursor-pointer transition-colors hover:border-blue-300 ${
                           isToday(day)
                             ? 'bg-blue-50 border-blue-200'
-                            : 'bg-white border-gray-200'
+                            : isNonWorkingDay
+                              ? 'bg-gray-100 border-gray-200'
+                              : 'bg-white border-gray-200'
                         }`}
                         onClick={() => openScheduleModal(day)}
                       >
                         <div className="p-1">
-                          <div className={`text-sm font-medium ${isToday(day) ? 'text-blue-600' : 'text-gray-900'}`}>
+                          <div className={`text-sm font-medium flex items-center gap-1 ${
+                            isToday(day)
+                              ? 'text-blue-600'
+                              : isWeekend
+                                ? 'text-red-400'
+                                : isNonWorkingDay
+                                  ? 'text-orange-400'
+                                  : 'text-gray-900'
+                          }`}>
                             {format(day, 'd')}
+                            {isNonWorkingDay && !isWeekend && (
+                              <span className="text-xs text-orange-400">휴</span>
+                            )}
                           </div>
                           <div className="mt-1 space-y-0.5">
                             {daySchedules.slice(0, 2).map((schedule) => {

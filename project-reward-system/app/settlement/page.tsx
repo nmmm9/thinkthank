@@ -5,11 +5,11 @@ import PageHeader from '@/components/PageHeader';
 import FilterBar, { FilterSelect, FilterInput } from '@/components/FilterBar';
 import Modal from '@/components/Modal';
 import { SaveButton, DeleteButton } from '@/components/ActionButtons';
-import { getProjects, getReceipts, getProjectCategories, getMembers, getOpexList, getSchedules, settleProject, unsettleProject } from '@/lib/api';
-import type { Project, Receipt, ProjectCategory, Schedule, Opex, MemberWithRelations } from '@/lib/supabase/database.types';
+import { getProjects, getReceipts, getProjectCategories, getMembers, getOpexList, getSchedules, getWorkTimeSetting, settleProject, unsettleProject } from '@/lib/api';
+import type { Project, Receipt, ProjectCategory, Schedule, Opex, MemberWithRelations, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { format, differenceInDays } from 'date-fns';
 import { Star, Check } from 'lucide-react';
-import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
+import { getWorkingDaysInMonth, getYearMonthFromDate, calculateEffectiveMinutes } from '@/lib/utils/workdays';
 import { useAuthStore } from '@/lib/auth-store';
 
 export default function SettlementPage() {
@@ -28,18 +28,26 @@ export default function SettlementPage() {
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 업무시간 설정 (기본값: 09:30 ~ 18:30)
+  const workHours = {
+    start: workTimeSetting?.work_start_time || '09:30',
+    end: workTimeSetting?.work_end_time || '18:30',
+  };
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [projectsData, receiptsData, categoriesData, membersData, opexData, schedulesData] = await Promise.all([
+        const [projectsData, receiptsData, categoriesData, membersData, opexData, schedulesData, workTimeData] = await Promise.all([
           getProjects(),
           getReceipts(),
           getProjectCategories(),
           getMembers(),
           getOpexList(),
           getSchedules(),
+          getWorkTimeSetting(),
         ]);
         setProjects(projectsData);
         setReceipts(receiptsData);
@@ -47,6 +55,7 @@ export default function SettlementPage() {
         setMembers(membersData);
         setOpexes(opexData);
         setSchedules(schedulesData);
+        setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -137,14 +146,15 @@ export default function SettlementPage() {
       // 개인 연봉 비중
       const salaryRatio = totalAnnualSalary > 0 ? member.annual_salary / totalAnnualSalary : 0;
 
-      // 스케줄을 월별로 그룹화
+      // 스케줄을 월별로 그룹화 (업무시간 내 유효 분만 계산)
       const schedulesByMonth: { [yearMonth: string]: { minutes: number } } = {};
       memberSchedules.forEach((s) => {
         const yearMonth = getYearMonthFromDate(s.date);
         if (!schedulesByMonth[yearMonth]) {
           schedulesByMonth[yearMonth] = { minutes: 0 };
         }
-        schedulesByMonth[yearMonth].minutes += s.minutes;
+        // 업무시간 내 유효 분만 계산
+        schedulesByMonth[yearMonth].minutes += calculateEffectiveMinutes(s, workHours);
       });
 
       // 각 월별로 계산

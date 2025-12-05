@@ -140,3 +140,78 @@ export function getWorkingDaysBetween(startDate: Date, endDate: Date): number {
 
   return workingDays;
 }
+
+// 시간 문자열을 분으로 변환 ("HH:MM" -> 분)
+function timeToMinutes(time: string): number {
+  const [hours, mins] = time.split(':').map(Number);
+  return hours * 60 + mins;
+}
+
+// 스케줄의 업무시간 내 유효 분 계산
+// schedule: { date, start_time, end_time, minutes }
+// workHours: { start: "09:30", end: "18:30" }
+export function calculateEffectiveMinutes(
+  schedule: {
+    date?: string;
+    start_time: string | null;
+    end_time: string | null;
+    minutes: number;
+  },
+  workHours: {
+    start: string;
+    end: string;
+  }
+): number {
+  // 주말인 경우 0 반환
+  if (schedule.date) {
+    const scheduleDate = new Date(schedule.date);
+    const day = scheduleDate.getDay();
+    if (day === 0 || day === 6) {
+      return 0; // 토요일(6) 또는 일요일(0)
+    }
+
+    // 공휴일인 경우 0 반환
+    if (!isWorkingDay(scheduleDate)) {
+      return 0;
+    }
+  }
+
+  // start_time이나 end_time이 없으면 전체 minutes 반환 (호환성)
+  if (!schedule.start_time || !schedule.end_time) {
+    return schedule.minutes;
+  }
+
+  const scheduleStart = timeToMinutes(schedule.start_time);
+  const scheduleEnd = timeToMinutes(schedule.end_time);
+  const workStart = timeToMinutes(workHours.start);
+  const workEnd = timeToMinutes(workHours.end);
+
+  // 스케줄이 업무시간과 전혀 겹치지 않는 경우
+  if (scheduleEnd <= workStart || scheduleStart >= workEnd) {
+    return 0;
+  }
+
+  // 겹치는 구간 계산
+  const overlapStart = Math.max(scheduleStart, workStart);
+  const overlapEnd = Math.min(scheduleEnd, workEnd);
+  const effectiveMinutes = Math.max(0, overlapEnd - overlapStart);
+
+  return effectiveMinutes;
+}
+
+// 스케줄 배열의 유효 분 합계 계산
+export function calculateTotalEffectiveMinutes(
+  schedules: Array<{
+    start_time: string | null;
+    end_time: string | null;
+    minutes: number;
+  }>,
+  workHours: {
+    start: string;
+    end: string;
+  }
+): number {
+  return schedules.reduce((total, schedule) => {
+    return total + calculateEffectiveMinutes(schedule, workHours);
+  }, 0);
+}

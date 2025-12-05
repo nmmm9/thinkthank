@@ -2,11 +2,11 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getProjects, getMembers, getOpexList, getSchedules } from '@/lib/api';
-import type { Project, Opex, MemberWithRelations, Schedule } from '@/lib/supabase/database.types';
+import { getProjects, getMembers, getOpexList, getSchedules, getWorkTimeSetting } from '@/lib/api';
+import type { Project, Opex, MemberWithRelations, Schedule, WorkTimeSetting } from '@/lib/supabase/database.types';
 import { ChevronDown, ChevronRight, User, Briefcase, TrendingUp, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
-import { getWorkingDaysInMonth, getYearMonthFromDate } from '@/lib/utils/workdays';
+import { getWorkingDaysInMonth, getYearMonthFromDate, calculateEffectiveMinutes } from '@/lib/utils/workdays';
 import { useAuthStore } from '@/lib/auth-store';
 
 export default function MemberPerformancePage() {
@@ -20,7 +20,14 @@ export default function MemberPerformancePage() {
   const [members, setMembers] = useState<MemberWithRelations[]>([]);
   const [opexes, setOpexes] = useState<Opex[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [workTimeSetting, setWorkTimeSetting] = useState<WorkTimeSetting | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // 업무시간 설정 (기본값: 09:30 ~ 18:30)
+  const workHours = {
+    start: workTimeSetting?.work_start_time || '09:30',
+    end: workTimeSetting?.work_end_time || '18:30',
+  };
 
   // 권한 체크 - admin만 접근 가능
   useEffect(() => {
@@ -33,16 +40,18 @@ export default function MemberPerformancePage() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [projectsData, membersData, opexData, schedulesData] = await Promise.all([
+        const [projectsData, membersData, opexData, schedulesData, workTimeData] = await Promise.all([
           getProjects(),
           getMembers(),
           getOpexList(),
           getSchedules(),
+          getWorkTimeSetting(),
         ]);
         setProjects(projectsData);
         setMembers(membersData);
         setOpexes(opexData);
         setSchedules(schedulesData);
+        setWorkTimeSetting(workTimeData as WorkTimeSetting | null);
       } catch (error) {
         console.error('Failed to load data:', error);
       } finally {
@@ -88,11 +97,13 @@ export default function MemberPerformancePage() {
 
           const plannedDays = allocation.planned_days || 0;
 
-          // 실제 투입 시간 계산
+          // 실제 투입 시간 계산 (업무시간 내 유효 분만)
           const memberSchedules = schedules.filter(
             (s) => s.member_id === member.id && s.project_id === project.id
           );
-          const actualMinutes = memberSchedules.reduce((sum, s) => sum + s.minutes, 0);
+          const actualMinutes = memberSchedules.reduce((sum, s) => {
+            return sum + calculateEffectiveMinutes(s, workHours);
+          }, 0);
           const actualDays = actualMinutes / 480;
 
           // 일당 비용 계산
