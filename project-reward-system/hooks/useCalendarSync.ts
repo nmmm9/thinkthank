@@ -222,10 +222,13 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
 
       // 월별로 동기화
       for (const { year, month } of months) {
-        const startDate = new Date(year, month, 1);
-        const endDate = new Date(year, month + 1, 0); // 해당 월의 마지막 날
-        const startStr = startDate.toISOString().split('T')[0];
-        const endStr = endDate.toISOString().split('T')[0];
+        // 시작일: 해당 월 1일
+        const startStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+        // 종료일: 다음 월 1일 (timeMax는 exclusive라서 다음 달 1일로 설정해야 해당 월 전체 포함)
+        const nextMonth = month + 1;
+        const nextYear = nextMonth > 11 ? year + 1 : year;
+        const actualNextMonth = nextMonth > 11 ? 0 : nextMonth;
+        const endStr = `${nextYear}-${String(actualNextMonth + 1).padStart(2, '0')}-01`;
         const periodStr = `${year}년 ${month + 1}월`;
 
         setHistorySyncProgress((prev) => ({
@@ -244,7 +247,7 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
             syncOptions: {
               startDate: startStr,
               endDate: endStr,
-              maxResults: 1000, // 월당 최대 1000개
+              // maxResults 제거 - 월별 전체 이벤트 가져오기
               isHistorySync: completedMonths > 3, // 미래 3개월 이후는 히스토리 모드
             },
           }),
@@ -256,7 +259,9 @@ export function useCalendarSync(options: UseCalendarSyncOptions = {}) {
         if (data.error) {
           console.error(`Sync error for ${periodStr}:`, data.error);
         } else {
-          totalEvents += data.stats?.created || 0;
+          // fetched (가져온 수) + created (생성된 수) 모두 카운트
+          totalEvents += data.stats?.fetched || 0;
+          console.log(`${periodStr}: ${data.stats?.fetched || 0}개 가져옴, ${data.stats?.created || 0}개 생성`);
         }
 
         setHistorySyncProgress((prev) => ({

@@ -359,16 +359,16 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
                     />
                   </div>
                   <p className="text-xs text-purple-600 mt-1">
-                    {historySyncProgress.totalEvents}개 이벤트 동기화됨
+                    {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
                   </p>
                 </div>
               )}
 
               {/* 완료 메시지 */}
-              {historySyncProgress && !historySyncProgress.isRunning && historySyncProgress.completedMonths > 0 && (
+              {historySyncProgress && !historySyncProgress.isRunning && historySyncProgress.completedMonths > 0 && !historySyncProgress.error && (
                 <div className="mt-2 bg-green-50 rounded p-2">
                   <p className="text-xs text-green-700">
-                    완료! {historySyncProgress.totalEvents}개 이벤트 동기화됨
+                    완료! {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
                   </p>
                 </div>
               )}
@@ -451,7 +451,7 @@ export default function GoogleCalendarSync({ onSyncComplete }: { onSyncComplete?
                   />
                 </div>
                 <p className="text-xs text-blue-600 mt-1">
-                  {historySyncProgress.totalEvents}개 이벤트 동기화됨
+                  {historySyncProgress.totalEvents.toLocaleString()}개 이벤트 처리됨
                 </p>
               </div>
             )}
